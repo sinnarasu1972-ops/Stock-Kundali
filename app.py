@@ -12,21 +12,30 @@ from io import StringIO, BytesIO
 warnings.filterwarnings("ignore")
 
 # =========================================================
-# RENDER / PATH CONFIG
+# RENDER / PATH CONFIG (WORKS: Render + Local Windows)
 # =========================================================
 IS_RENDER = os.getenv("RENDER", "").lower() == "true"
 
-# Render persistent disk mount (you set this in Render)
+# Render Disk default: /mnt/data  (set in render.yaml)
 DATA_DIR = Path(os.getenv("DATA_DIR", "/mnt/data" if IS_RENDER else ".")).resolve()
 
-# Where your input xls files will be stored on Render
+# Optional folders (good for uploads)
 INPUT_DIR = Path(os.getenv("INPUT_DIR", str(DATA_DIR / "input"))).resolve()
-
-# Where exports will be stored (optional; downloads also available)
 EXPORT_DIR = Path(os.getenv("EXPORT_DIR", str(DATA_DIR / "exports"))).resolve()
 
+# Repo folder (where app.py exists on Render build)
+BASE_DIR = Path(__file__).resolve().parent
+
+# IMPORTANT:
+# Your .xls files may be in GitHub repo root OR uploaded to Render Disk.
+# We will search BOTH.
+CANDIDATE_INPUT_DIRS = [
+    INPUT_DIR,    # /mnt/data/input  (upload API)
+    BASE_DIR,     # repo folder (GitHub committed files)
+]
+
 # =========================================================
-# YOUR MAPPINGS (SAME AS YOUR CODE)
+# YOUR ORIGINAL SETTINGS (UNCHANGED)
 # =========================================================
 FILE_MAPPINGS = {
     "_AMRAVATI_STOCK_Summary_report.xls": "AMT",
@@ -69,7 +78,7 @@ app = FastAPI(title="Unnati Stock Kundali (Render Ready)")
 
 
 # =========================================================
-# FILE READING (SAME LOGIC)
+# FILE READING (UNCHANGED LOGIC)
 # =========================================================
 def detect_format(file_path: str) -> str:
     try:
@@ -79,12 +88,16 @@ def detect_format(file_path: str) -> str:
         header_str = header.decode("utf-8", errors="ignore").lower()
         if "<html" in header_str or "<table" in header_str or "<!doctype" in header_str:
             return "HTML"
+
         if b"\t" in header:
             return "TSV"
+
         if header[:8] == b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1":
             return "XLS"
+
         if header[:2] == b"PK":
             return "XLSX"
+
         return "UNKNOWN"
     except:
         return "UNKNOWN"
@@ -113,6 +126,7 @@ def read_tsv_file(file_path: str):
 
 
 def read_xls_file(file_path: str):
+    # Try common engines safely
     for engine in ["xlrd", "openpyxl", None]:
         try:
             df = pd.read_excel(file_path, engine=engine)
@@ -133,6 +147,7 @@ def read_file(file_path: str):
     if file_format in ["XLS", "XLSX"]:
         return read_xls_file(file_path)
 
+    # Fallback attempts
     for df, method in [read_tsv_file(file_path), read_xls_file(file_path), read_html_file(file_path)]:
         if df is not None and len(df) > 0:
             return df, method
@@ -140,21 +155,38 @@ def read_file(file_path: str):
     return None, None
 
 
+def _find_input_file(filename: str) -> Path | None:
+    for d in CANDIDATE_INPUT_DIRS:
+        p = d / filename
+        if p.exists():
+            return p
+    return None
+
+
 def load_files():
     global _data_cache
 
-    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print("\n" + "=" * 80)
+    print("LOADING AND MERGING FILES (Render Ready)")
+    print("=" * 80)
+    print(f"DATA_DIR  : {DATA_DIR}")
+    print(f"INPUT_DIR : {INPUT_DIR}")
+    print(f"BASE_DIR  : {BASE_DIR}")
+    print("=" * 80)
+
     all_data = []
     file_count = 0
 
-    for filename, division in FILE_MAPPINGS.items():
-        file_path = INPUT_DIR / filename
+    for idx, (filename, division) in enumerate(FILE_MAPPINGS.items(), 1):
+        file_path = _find_input_file(filename)
 
-        if not file_path.exists():
+        if file_path is None:
+            print(f"[{idx}/{len(FILE_MAPPINGS)}]  {filename}... [MISSING]")
             continue
 
         df, method = read_file(str(file_path))
         if df is None or len(df) == 0:
+            print(f"[{idx}/{len(FILE_MAPPINGS)}]  {filename}... [FAILED]")
             continue
 
         df = df.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
@@ -163,13 +195,17 @@ def load_files():
 
         all_data.append(df)
         file_count += 1
+        print(f"[{idx}/{len(FILE_MAPPINGS)}]  {filename}... [OK] ({method}, {len(df):,} rows)")
 
     if not all_data:
         _data_cache = None
+        print("\n[WARNING] No valid files loaded.")
         return None
 
     combined_df = pd.concat(all_data, ignore_index=True)
     _data_cache = combined_df
+    print(f"\n[OK] Total merged rows: {len(combined_df):,}")
+    print(f"[OK] Total columns: {len(combined_df.columns)}")
     return combined_df
 
 
@@ -181,7 +217,7 @@ def get_data():
 
 
 # =========================================================
-# HELPERS (SAME)
+# HELPERS (UNCHANGED)
 # =========================================================
 def format_indian_number(num, decimal_places=0):
     if pd.isna(num):
@@ -247,7 +283,7 @@ def filter_data(divisions=None):
 
 
 # =========================================================
-# PIVOT LOGIC (SAME)
+# PIVOT LOGIC (UNCHANGED)
 # =========================================================
 def create_standard_pivot(df):
     if df is None or len(df) == 0 or "Division" not in df.columns:
@@ -390,8 +426,10 @@ def create_pivot(df, sheet_name):
 
     if sheet_name == "Overall_Division_Pivot":
         return create_standard_pivot(df)
+
     if sheet_name == "ABC_Analysis":
         return create_abc_analysis(df)
+
     if sheet_name == "RIS_Analysis":
         return create_ris_analysis(df)
 
@@ -399,15 +437,17 @@ def create_pivot(df, sheet_name):
         category_name = sheet_name.replace("Cat_", "").replace("_", " ")
         if "PART_CATGRY_DESC" in df.columns:
             df = df[df["PART_CATGRY_DESC"].astype(str).str.contains(category_name, case=False, na=False)]
+
         if sheet_name in RIS_CATEGORY_SHEETS:
             return create_category_ris_tables(df, sheet_name)
+
         return create_standard_pivot(df)
 
     return create_standard_pivot(df)
 
 
 # =========================================================
-# HTML (your UI kept; minimal changes)
+# TABLE HTML (UNCHANGED STYLE + SAFE FORMAT)
 # =========================================================
 def format_value(value):
     if value is None or (isinstance(value, float) and pd.isna(value)):
@@ -485,62 +525,7 @@ def safe_title(sheet: str) -> str:
 
 
 # =========================================================
-# API: UPLOAD FILES to Render Disk
-# =========================================================
-@app.post("/upload")
-async def upload_files(files: list[UploadFile] = File(...)):
-    """
-    Upload your *_STOCK_Summary_report.xls files here.
-    After upload, open /reload then dashboard will show data.
-    """
-    INPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    saved = []
-    for f in files:
-        name = Path(f.filename).name
-        # keep only mapping files (optional safety)
-        if name not in FILE_MAPPINGS:
-            # You can allow all, but better to restrict
-            continue
-
-        content = await f.read()
-        if not content:
-            continue
-
-        out = INPUT_DIR / name
-        out.write_bytes(content)
-        saved.append(name)
-
-    if not saved:
-        raise HTTPException(status_code=400, detail="No valid files uploaded. Filenames must match FILE_MAPPINGS keys.")
-
-    return {"status": "success", "saved": saved, "input_dir": str(INPUT_DIR)}
-
-
-@app.post("/reload")
-async def reload_data():
-    global _data_cache
-    _data_cache = None
-    df = load_files()
-    if df is None:
-        return {"status": "error", "message": "No data loaded. Upload files first."}
-    return {"status": "success", "rows": int(len(df)), "cols": int(len(df.columns))}
-
-
-@app.get("/health")
-async def health():
-    return {"ok": True, "render": IS_RENDER, "input_dir": str(INPUT_DIR), "export_dir": str(EXPORT_DIR)}
-
-
-@app.get("/api/product-divisions")
-async def api_divisions(request: Request):
-    sheet = request.query_params.get("sheet", None)
-    divisions = get_divisions(sheet)
-    return JSONResponse(content={"divisions": divisions})
-
-
-# =========================================================
-# EXPORT as direct download (works on Render)
+# EXPORT HELPERS (PIVOT CSV + RAW CSV)
 # =========================================================
 def pivot_to_csv_bytes(pivot_result) -> bytes:
     buf = StringIO()
@@ -585,14 +570,96 @@ def pivot_to_csv_bytes(pivot_result) -> bytes:
     return buf.getvalue().encode("utf-8-sig")
 
 
+def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    if df is None or len(df) == 0:
+        return "No data".encode("utf-8-sig")
+    return df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+
+
+# =========================================================
+# API: HEALTH / RELOAD / UPLOAD (RENDER READY)
+# =========================================================
+@app.get("/health")
+async def health():
+    df = get_data()
+    return {
+        "ok": True,
+        "render": IS_RENDER,
+        "data_dir": str(DATA_DIR),
+        "input_dir": str(INPUT_DIR),
+        "base_dir": str(BASE_DIR),
+        "candidate_input_dirs": [str(x) for x in CANDIDATE_INPUT_DIRS],
+        "loaded": df is not None,
+        "rows": int(len(df)) if df is not None else 0,
+        "cols": int(len(df.columns)) if df is not None else 0,
+    }
+
+
+@app.post("/reload")
+async def reload_data():
+    global _data_cache
+    _data_cache = None
+    df = load_files()
+    if df is None:
+        return {"status": "error", "message": "No data loaded. Check files exist in repo or upload to /upload."}
+    return {"status": "success", "rows": int(len(df)), "cols": int(len(df.columns))}
+
+
+@app.post("/upload")
+async def upload_files(files: list[UploadFile] = File(...)):
+    """
+    Upload your *_STOCK_Summary_report.xls files here.
+    They will be saved into /mnt/data/input on Render Disk.
+    Then call /reload.
+    """
+    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    saved = []
+    skipped = []
+    for f in files:
+        name = Path(f.filename).name
+
+        # Allow only expected names (safe)
+        if name not in FILE_MAPPINGS:
+            skipped.append(name)
+            continue
+
+        content = await f.read()
+        if not content:
+            skipped.append(name)
+            continue
+
+        out = INPUT_DIR / name
+        out.write_bytes(content)
+        saved.append(name)
+
+    if not saved:
+        raise HTTPException(status_code=400, detail={"message": "No valid files uploaded", "skipped": skipped})
+
+    return {"status": "success", "saved": saved, "skipped": skipped, "input_dir": str(INPUT_DIR)}
+
+
+# =========================================================
+# API: DIVISIONS
+# =========================================================
+@app.get("/api/product-divisions")
+async def api_divisions(request: Request):
+    sheet = request.query_params.get("sheet", None)
+    divisions = get_divisions(sheet)
+    return JSONResponse(content={"divisions": divisions})
+
+
+# =========================================================
+# DOWNLOAD ENDPOINTS (PIVOT + RAW)
+# =========================================================
 @app.get("/download")
 async def download_csv(request: Request):
     sheet = request.query_params.get("sheet", SHEET_NAMES[0])
     divisions_param = request.query_params.get("divisions", "All")
 
     divisions_list = [] if divisions_param == "All" else [d.strip() for d in divisions_param.split(",") if d.strip()]
-
     df = filter_data(divisions_list if divisions_list else None)
+
     pivot_result = create_pivot(df, sheet)
     if pivot_result is None:
         raise HTTPException(status_code=404, detail="No data to export")
@@ -608,47 +675,67 @@ async def download_csv(request: Request):
     )
 
 
+@app.get("/download-raw")
+async def download_raw_csv(request: Request):
+    divisions_param = request.query_params.get("divisions", "All")
+    divisions_list = [] if divisions_param == "All" else [d.strip() for d in divisions_param.split(",") if d.strip()]
+    df = filter_data(divisions_list if divisions_list else None)
+    if df is None or len(df) == 0:
+        raise HTTPException(status_code=404, detail="No data to export")
+
+    content = df_to_csv_bytes(df)
+    now = datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
+    filename = f"RAW_DATA_{now}.csv"
+
+    return StreamingResponse(
+        BytesIO(content),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # =========================================================
-# DASHBOARD (your UI; export buttons point to /download)
+# DASHBOARD (YOUR UI + WORKS ON MOBILE/DESKTOP)
 # =========================================================
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    sheet = request.query_params.get("sheet", SHEET_NAMES[0])
-    divisions_param = request.query_params.get("divisions", "All")
+    try:
+        sheet = request.query_params.get("sheet", SHEET_NAMES[0])
+        divisions_param = request.query_params.get("divisions", "All")
 
-    if divisions_param == "All":
-        divisions_list = []
-        selected_divisions = []
-    else:
-        decoded = divisions_param
-        divisions_list = [d.strip() for d in decoded.split(",") if d.strip()]
-        selected_divisions = divisions_list[:]
+        if divisions_param == "All":
+            divisions_list = []
+            selected_divisions = []
+        else:
+            decoded = divisions_param
+            divisions_list = [d.strip() for d in decoded.split(",") if d.strip()]
+            selected_divisions = divisions_list[:]
 
-    all_divisions = get_divisions(sheet)
+        all_divisions = get_divisions(sheet)
 
-    buttons = []
-    for s in SHEET_NAMES:
-        active = "active" if s == sheet else ""
-        buttons.append(f'<a class="navbtn {active}" href="/?sheet={s}&divisions={divisions_param}">{safe_title(s)}</a>')
-    buttons_html = "".join(buttons)
+        buttons = []
+        for s in SHEET_NAMES:
+            active = "active" if s == sheet else ""
+            buttons.append(f'<a class="navbtn {active}" href="/?sheet={s}&divisions={divisions_param}">{safe_title(s)}</a>')
+        buttons_html = "".join(buttons)
 
-    df = filter_data(divisions_list if divisions_list else None)
-    pivot_result = create_pivot(df, sheet)
-    table_html = table_to_html(pivot_result)
+        df = filter_data(divisions_list if divisions_list else None)
+        pivot_result = create_pivot(df, sheet)
+        table_html = table_to_html(pivot_result)
 
-    divisions_display = "All Divisions" if not selected_divisions else ", ".join(selected_divisions)
+        divisions_display = "All Divisions" if not selected_divisions else ", ".join(selected_divisions)
 
-    def esc_attr(s: str) -> str:
-        return str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+        def esc_attr(s: str) -> str:
+            return str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
 
-    checkbox_rows = []
-    for div in all_divisions:
-        checked = "checked" if div in selected_divisions else ""
-        v = esc_attr(div)
-        checkbox_rows.append(f'<label class="chk"><input type="checkbox" value="{v}" {checked}><span>{v}</span></label>')
-    checkbox_html = "".join(checkbox_rows)
+        checkbox_rows = []
+        for div in all_divisions:
+            checked = "checked" if div in selected_divisions else ""
+            v = esc_attr(div)
+            checkbox_rows.append(f'<label class="chk"><input type="checkbox" value="{v}" {checked}><span>{v}</span></label>')
+        checkbox_html = "".join(checkbox_rows)
 
-    html = f"""<!DOCTYPE html>
+        html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
@@ -664,6 +751,8 @@ async def dashboard(request: Request):
   --brand1: #0b1b3a;
   --brand2: #123a7a;
   --btn: #0f4c81;
+  --btn2: #0a6a3a;
+  --danger: #b42318;
   --shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
 }}
 
@@ -676,17 +765,20 @@ body {{
   height: 100vh;
   overflow: hidden;
 }}
+
 .app {{
   display: grid;
   grid-template-rows: auto 1fr;
   height: 100vh;
 }}
+
 header {{
   background: linear-gradient(135deg, var(--brand1), var(--brand2));
   color: #fff;
   padding: 10px 14px;
   box-shadow: var(--shadow);
 }}
+
 .hrow {{
   display: flex;
   align-items: center;
@@ -694,10 +786,23 @@ header {{
   gap: 12px;
   flex-wrap: wrap;
 }}
+
+.brand {{
+  display: flex;
+  flex-direction: column;
+  min-width: 260px;
+}}
 .brand .title {{
   font-size: 18px;
   font-weight: 800;
+  letter-spacing: .2px;
 }}
+.brand .sub {{
+  font-size: 12px;
+  color: rgba(255,255,255,.75);
+  margin-top: 2px;
+}}
+
 .controls {{
   display: flex;
   align-items: center;
@@ -706,15 +811,18 @@ header {{
   justify-content: center;
   min-width: 280px;
 }}
+
 .ctrl-label {{
   font-size: 13px;
   font-weight: 700;
   color: rgba(255,255,255,.9);
 }}
+
 .multi {{
   position: relative;
   width: min(520px, 70vw);
 }}
+
 .multi-btn {{
   width: 100%;
   background: #fff;
@@ -727,17 +835,20 @@ header {{
   gap: 10px;
   cursor: pointer;
 }}
+
 .multi-btn .left {{
   display: flex;
   flex-direction: column;
   gap: 2px;
   align-items: flex-start;
 }}
+
 .multi-btn .top {{
   font-size: 13px;
   font-weight: 800;
   color: var(--text);
 }}
+
 .multi-btn .hint {{
   font-size: 12px;
   color: var(--muted);
@@ -746,6 +857,7 @@ header {{
   overflow: hidden;
   text-overflow: ellipsis;
 }}
+
 .multi-btn .badge {{
   background: #e2e8f0;
   color: #0f172a;
@@ -754,6 +866,7 @@ header {{
   padding: 4px 8px;
   border-radius: 999px;
 }}
+
 .multi-menu {{
   display: none;
   position: absolute;
@@ -769,7 +882,9 @@ header {{
   z-index: 1000;
   overflow: hidden;
 }}
+
 .multi-menu.show {{ display: grid; grid-template-rows: auto 1fr auto; }}
+
 .multi-top {{
   padding: 10px 10px 8px;
   border-bottom: 1px solid var(--line);
@@ -778,6 +893,7 @@ header {{
   gap: 8px;
   align-items: center;
 }}
+
 .multi-top input {{
   width: 100%;
   border: 1px solid var(--line);
@@ -786,6 +902,7 @@ header {{
   font-size: 13px;
   outline: none;
 }}
+
 .mini-btn {{
   border: 1px solid var(--line);
   background: #fff;
@@ -795,11 +912,14 @@ header {{
   font-weight: 800;
   cursor: pointer;
 }}
+
 .mini-btn:hover {{ background: #f8fafc; }}
+
 .multi-list {{
   padding: 6px 8px;
   overflow: auto;
 }}
+
 .chk {{
   display: flex;
   gap: 10px;
@@ -809,16 +929,20 @@ header {{
   cursor: pointer;
   user-select: none;
 }}
+
 .chk:hover {{ background: #f1f5f9; }}
+
 .chk input {{
   width: 16px;
   height: 16px;
   accent-color: var(--btn);
 }}
+
 .chk span {{
   font-size: 13px;
   color: #0f172a;
 }}
+
 .multi-foot {{
   padding: 10px;
   border-top: 1px solid var(--line);
@@ -826,6 +950,7 @@ header {{
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }}
+
 .act {{
   border: 0;
   border-radius: 10px;
@@ -834,6 +959,7 @@ header {{
   font-size: 13px;
   cursor: pointer;
 }}
+
 .apply {{ background: #16a34a; color: #fff; }}
 .clear {{ background: #ef4444; color: #fff; }}
 
@@ -842,6 +968,7 @@ header {{
   gap: 8px;
   align-items: center;
 }}
+
 .btn {{
   border: 0;
   border-radius: 10px;
@@ -851,7 +978,9 @@ header {{
   cursor: pointer;
   color: #fff;
 }}
+
 .btn.export {{ background: #16a34a; }}
+.btn.raw {{ background: #0a6a3a; }}
 .btn.reset {{ background: #ef4444; }}
 
 main {{
@@ -862,6 +991,7 @@ main {{
   height: 100%;
   overflow: hidden;
 }}
+
 aside {{
   background: var(--card);
   border-radius: 14px;
@@ -870,6 +1000,7 @@ aside {{
   overflow: auto;
   padding: 10px;
 }}
+
 .navbtn {{
   display: block;
   text-decoration: none;
@@ -882,9 +1013,11 @@ aside {{
   margin-bottom: 8px;
   background: linear-gradient(135deg, #f59e0b, #d97706);
 }}
+
 .navbtn.active {{
   background: linear-gradient(135deg, #0b1b3a, #123a7a);
 }}
+
 section.content {{
   background: var(--card);
   border-radius: 14px;
@@ -894,6 +1027,7 @@ section.content {{
   display: grid;
   grid-template-rows: auto 1fr;
 }}
+
 .topbar {{
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
@@ -902,21 +1036,25 @@ section.content {{
   align-items: center;
   gap: 12px;
 }}
+
 .topbar .h1 {{
   font-size: 15px;
   font-weight: 900;
   color: #0b1b3a;
 }}
+
 .topbar .meta {{
   font-size: 12px;
   color: var(--muted);
   font-weight: 800;
   white-space: nowrap;
 }}
+
 .view {{
   overflow: auto;
   padding: 12px;
 }}
+
 .tbl-title {{
   background: linear-gradient(135deg, #4c1d95, #312e81);
   color: #fff;
@@ -925,12 +1063,14 @@ section.content {{
   font-size: 13px;
   border-radius: 12px 12px 0 0;
 }}
+
 .tbl-wrap {{
   overflow: auto;
   border: 1px solid var(--line);
   border-top: 0;
   border-radius: 0 0 12px 12px;
 }}
+
 table.pivot {{
   width: 100%;
   border-collapse: separate;
@@ -938,6 +1078,7 @@ table.pivot {{
   font-size: 12.5px;
   min-width: 820px;
 }}
+
 table.pivot thead th {{
   position: sticky;
   top: 0;
@@ -950,16 +1091,19 @@ table.pivot thead th {{
   font-weight: 900;
   white-space: nowrap;
 }}
+
 table.pivot thead th:first-child {{
   left: 0;
   z-index: 12;
   text-align: left;
 }}
+
 table.pivot td {{
   border-bottom: 1px solid var(--line);
   padding: 7px 10px;
   white-space: nowrap;
 }}
+
 td.rowlabel {{
   position: sticky;
   left: 0;
@@ -969,12 +1113,15 @@ td.rowlabel {{
   color: #0b1b3a;
   text-align: left;
 }}
+
 td.num {{ text-align: right; }}
+
 tr.total td {{
   background: linear-gradient(180deg, #1d4ed8, #1e40af) !important;
   color: #fff !important;
   font-weight: 900;
 }}
+
 .neg {{ color: #0b7a2d; font-weight: 900; }}
 
 @media (max-width: 980px) {{
@@ -1062,6 +1209,11 @@ function exportData() {{
   window.location.href = `/download?sheet=${{sheet}}&divisions=${{encodeURIComponent(divisionsParam)}}`;
 }}
 
+function exportRawData() {{
+  const divisionsParam = "{divisions_param}";
+  window.location.href = `/download-raw?divisions=${{encodeURIComponent(divisionsParam)}}`;
+}}
+
 function clearAll() {{
   window.location.href = "/?sheet=Overall_Division_Pivot&divisions=All";
 }}
@@ -1086,6 +1238,7 @@ document.addEventListener("change", function(e) {{
     <div class="hrow">
       <div class="brand">
         <div class="title">Unnati Stock Kundali</div>
+        <div class="sub">Render Ready | Upload: /docs → /upload → /reload</div>
       </div>
 
       <div class="controls">
@@ -1124,6 +1277,7 @@ document.addEventListener("change", function(e) {{
 
       <div class="actions">
         <button class="btn export" onclick="exportData()">Export CSV</button>
+        <button class="btn raw" onclick="exportRawData()">Export Raw CSV</button>
         <button class="btn reset" onclick="clearAll()">Clear All</button>
       </div>
     </div>
@@ -1137,7 +1291,7 @@ document.addEventListener("change", function(e) {{
     <section class="content">
       <div class="topbar">
         <div class="h1">{safe_title(sheet)} - {esc_attr(divisions_display)}</div>
-        <div class="meta">Upload files at /upload then /reload</div>
+        <div class="meta">Rows depend on selected divisions</div>
       </div>
       <div class="view">
         {table_html}
@@ -1148,11 +1302,16 @@ document.addEventListener("change", function(e) {{
 </body>
 </html>
 """
-    return HTMLResponse(content=html)
+        return HTMLResponse(content=html)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return HTMLResponse(f"<h1>Error: {e}</h1>")
 
 
 # =========================================================
-# LOCAL RUN (optional)
+# MAIN (Render uses startCommand: uvicorn app:app --port $PORT)
 # =========================================================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8002"))
