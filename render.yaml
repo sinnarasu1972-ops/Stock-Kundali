@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: stock-kundali-dashboard
+    runtime: python
+    plan: starter
+    autoDeploy: true
+
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+
+      # Your app reads these
+      - key: DATA_DIR
+        value: /mnt/data
+      - key: INPUT_DIR
+        value: /mnt/data/input
+      - key: EXPORT_DIR
+        value: /mnt/data/exports
+
+    disk:
+      name: stock-kundali-disk
+      mountPath: /mnt/data
+      sizeGB: 5
