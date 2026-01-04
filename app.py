@@ -191,7 +191,7 @@ def load_files():
 
         df = df.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
         df.columns = [str(c).strip() for c in df.columns]
-        df.insert(0, "Division", division)  # <-- location code (AMT/CHI/CITY/...)
+        df.insert(0, "Division", division)  # Location code (AMT/CHI/CITY/...)
 
         all_data.append(df)
         file_count += 1
@@ -272,12 +272,7 @@ def get_divisions(sheet_name=None):
     return sorted(df["PRODCT_DIVSN_DESC"].dropna().astype(str).unique().tolist())
 
 
-# ---------------- LOCATION (NEW) ----------------
 def get_locations():
-    """
-    Location = last 3 digit code you insert in column 'Division'
-    Example: AMT, CHI, CITY, HO, YAT, WAG, CHA, SHI, KOL
-    """
     df = get_data()
     if df is None or "Division" not in df.columns:
         return sorted(set(FILE_MAPPINGS.values()))
@@ -290,12 +285,10 @@ def filter_data(divisions=None, locations=None):
     if df is None:
         return None
 
-    # Product Division filter (existing)
     if divisions and len(divisions) > 0 and divisions != ["All"]:
         if "PRODCT_DIVSN_DESC" in df.columns:
             df = df[df["PRODCT_DIVSN_DESC"].astype(str).isin([str(x) for x in divisions])]
 
-    # Location filter (NEW) -> based on Division column (AMT/CHI/CITY/...)
     if locations and len(locations) > 0 and locations != ["All"]:
         if "Division" in df.columns:
             df = df[df["Division"].astype(str).isin([str(x) for x in locations])]
@@ -677,7 +670,7 @@ async def api_divisions(request: Request):
 async def download_csv(request: Request):
     sheet = request.query_params.get("sheet", SHEET_NAMES[0])
     divisions_param = request.query_params.get("divisions", "All")
-    locations_param = request.query_params.get("locations", "All")  # NEW
+    locations_param = request.query_params.get("locations", "All")
 
     divisions_list = [] if divisions_param == "All" else [d.strip() for d in divisions_param.split(",") if d.strip()]
     locations_list = [] if locations_param == "All" else [l.strip() for l in locations_param.split(",") if l.strip()]
@@ -705,7 +698,7 @@ async def download_csv(request: Request):
 @app.get("/download-raw")
 async def download_raw_csv(request: Request):
     divisions_param = request.query_params.get("divisions", "All")
-    locations_param = request.query_params.get("locations", "All")  # NEW
+    locations_param = request.query_params.get("locations", "All")
 
     divisions_list = [] if divisions_param == "All" else [d.strip() for d in divisions_param.split(",") if d.strip()]
     locations_list = [] if locations_param == "All" else [l.strip() for l in locations_param.split(",") if l.strip()]
@@ -729,16 +722,16 @@ async def download_raw_csv(request: Request):
 
 
 # =========================================================
-# DASHBOARD (YOUR UI + WORKS ON MOBILE/DESKTOP) (LOCATION ADDED)
+# DASHBOARD (YOUR UI + WORKS ON MOBILE/DESKTOP) (LOCATION + MOBILE FIX)
 # =========================================================
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     try:
         sheet = request.query_params.get("sheet", SHEET_NAMES[0])
         divisions_param = request.query_params.get("divisions", "All")
-        locations_param = request.query_params.get("locations", "All")  # NEW
+        locations_param = request.query_params.get("locations", "All")
 
-        # ---------------- Product Divisions selection (existing) ----------------
+        # Product Divisions selection
         if divisions_param == "All":
             divisions_list = []
             selected_divisions = []
@@ -747,7 +740,7 @@ async def dashboard(request: Request):
             divisions_list = [d.strip() for d in decoded.split(",") if d.strip()]
             selected_divisions = divisions_list[:]
 
-        # ---------------- Locations selection (NEW) ----------------
+        # Locations selection
         if locations_param == "All":
             locations_list = []
             selected_locations = []
@@ -757,7 +750,7 @@ async def dashboard(request: Request):
             selected_locations = locations_list[:]
 
         all_divisions = get_divisions(sheet)
-        all_locations = get_locations()  # NEW
+        all_locations = get_locations()
 
         buttons = []
         for s in SHEET_NAMES:
@@ -788,7 +781,7 @@ async def dashboard(request: Request):
             checkbox_rows.append(f'<label class="chk"><input type="checkbox" value="{v}" {checked}><span>{v}</span></label>')
         checkbox_html = "".join(checkbox_rows)
 
-        # Location checkbox list (NEW)
+        # Location checkbox list
         loc_checkbox_rows = []
         for loc in all_locations:
             checked = "checked" if loc in selected_locations else ""
@@ -1190,173 +1183,283 @@ tr.total td {{
   aside {{ display: none; }}
   table.pivot {{ min-width: 780px; }}
 }}
+
+/* =========================
+   MOBILE & TABLET FIXES
+   ========================= */
+@media (max-width: 768px) {{
+  header {{
+    padding: 10px;
+  }}
+
+  .hrow {{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }}
+
+  .brand {{
+    min-width: unset;
+    text-align: center;
+  }}
+
+  .controls {{
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    width: 100%;
+  }}
+
+  .ctrl-label {{
+    font-size: 12px;
+    text-align: left;
+  }}
+
+  .multi,
+  .multi.loc {{
+    width: 100%;
+  }}
+
+  .multi-btn {{
+    width: 100%;
+  }}
+
+  .actions {{
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }}
+
+  .btn.reset {{
+    grid-column: span 2;
+  }}
+
+  main {{
+    grid-template-columns: 1fr;
+    padding: 8px;
+  }}
+
+  aside {{
+    display: none;
+  }}
+
+  section.content {{
+    border-radius: 12px;
+  }}
+
+  .topbar {{
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }}
+
+  .topbar .h1 {{
+    font-size: 14px;
+  }}
+
+  .view {{
+    padding: 8px;
+  }}
+
+  table.pivot {{
+    min-width: 720px;
+  }}
+}}
+
+@media (max-width: 480px) {{
+  .brand .title {{
+    font-size: 16px;
+  }}
+
+  .brand .sub {{
+    font-size: 11px;
+  }}
+
+  .multi-btn .top {{
+    font-size: 12px;
+  }}
+
+  .multi-btn .hint {{
+    font-size: 11px;
+  }}
+
+  .btn {{
+    font-size: 12px;
+    padding: 9px;
+  }}
+
+  .tbl-title {{
+    font-size: 12px;
+  }}
+}}
 </style>
 
 <script>
-function $(id) {{ return document.getElementById(id); }}
+function $(id) { return document.getElementById(id); }
 
-// ===================== PRODUCT DIVISION MULTI (EXISTING) =====================
-function toggleMenu() {{
+// ===================== PRODUCT DIVISION MULTI =====================
+function toggleMenu() {
   const m = $("menu");
   m.classList.toggle("show");
-  if (m.classList.contains("show")) {{
+  if (m.classList.contains("show")) {
     $("search").focus();
     filterList();
-  }}
-}}
-function closeMenu() {{
+  }
+}
+function closeMenu() {
   const m = $("menu");
   m.classList.remove("show");
-}}
-function getSelected() {{
+}
+function getSelected() {
   const nodes = document.querySelectorAll('#list input[type="checkbox"]');
   const selected = [];
-  nodes.forEach(cb => {{ if (cb.checked) selected.push(cb.value.trim()); }});
+  nodes.forEach(cb => { if (cb.checked) selected.push(cb.value.trim()); });
   return selected;
-}}
-function setAll(state) {{
+}
+function setAll(state) {
   const nodes = document.querySelectorAll('#list input[type="checkbox"]');
   nodes.forEach(cb => cb.checked = state);
   updateButtonText();
-}}
-function clearSelection() {{
+}
+function clearSelection() {
   setAll(false);
-}}
-function updateButtonText() {{
+}
+function updateButtonText() {
   const selected = getSelected();
   const badge = $("badge");
   const hint = $("hint");
   badge.textContent = selected.length.toString();
 
-  if (selected.length === 0) {{
+  if (selected.length === 0) {
     hint.textContent = "All Divisions";
-  }} else if (selected.length <= 3) {{
+  } else if (selected.length <= 3) {
     hint.textContent = selected.join(", ");
-  }} else {{
+  } else {
     hint.textContent = selected.slice(0,3).join(", ") + " + " + (selected.length - 3).toString() + " more";
-  }}
-}}
-function applyDivisions() {{
+  }
+}
+function applyDivisions() {
   const selected = getSelected();
   const sheet = "{sheet}";
   let divisionsParam = "All";
   if (selected.length > 0) divisionsParam = selected.join(",");
   closeMenu();
   const locationsParam = "{locations_param}";
-  const newUrl = `/?sheet=${{sheet}}&divisions=${{encodeURIComponent(divisionsParam)}}&locations=${{encodeURIComponent(locationsParam)}}`;
+  const newUrl = `/?sheet=${sheet}&divisions=${encodeURIComponent(divisionsParam)}&locations=${encodeURIComponent(locationsParam)}`;
   window.location.href = newUrl;
-}}
-function filterList() {{
+}
+function filterList() {
   const q = $("search").value.toLowerCase().trim();
   const items = document.querySelectorAll('#list .chk');
   let shown = 0;
-  items.forEach(it => {{
+  items.forEach(it => {
     const txt = it.innerText.toLowerCase();
     const ok = txt.indexOf(q) !== -1;
     it.style.display = ok ? "flex" : "none";
     if (ok) shown++;
-  }});
+  });
   $("shown").textContent = shown.toString();
-}}
+}
 
-// ===================== LOCATION MULTI (NEW) =====================
-function toggleLocMenu() {{
+// ===================== LOCATION MULTI =====================
+function toggleLocMenu() {
   const m = $("loc_menu");
   m.classList.toggle("show");
-  if (m.classList.contains("show")) {{
+  if (m.classList.contains("show")) {
     $("loc_search").focus();
     filterLocList();
-  }}
-}}
-function closeLocMenu() {{
+  }
+}
+function closeLocMenu() {
   const m = $("loc_menu");
   m.classList.remove("show");
-}}
-function getLocSelected() {{
+}
+function getLocSelected() {
   const nodes = document.querySelectorAll('#loc_list input[type="checkbox"]');
   const selected = [];
-  nodes.forEach(cb => {{ if (cb.checked) selected.push(cb.value.trim()); }});
+  nodes.forEach(cb => { if (cb.checked) selected.push(cb.value.trim()); });
   return selected;
-}}
-function setLocAll(state) {{
+}
+function setLocAll(state) {
   const nodes = document.querySelectorAll('#loc_list input[type="checkbox"]');
   nodes.forEach(cb => cb.checked = state);
   updateLocButtonText();
-}}
-function clearLocSelection() {{
+}
+function clearLocSelection() {
   setLocAll(false);
-}}
-function updateLocButtonText() {{
+}
+function updateLocButtonText() {
   const selected = getLocSelected();
   const badge = $("loc_badge");
   const hint = $("loc_hint");
   badge.textContent = selected.length.toString();
 
-  if (selected.length === 0) {{
+  if (selected.length === 0) {
     hint.textContent = "All Locations";
-  }} else if (selected.length <= 6) {{
+  } else if (selected.length <= 6) {
     hint.textContent = selected.join(", ");
-  }} else {{
+  } else {
     hint.textContent = selected.slice(0,6).join(", ") + " + " + (selected.length - 6).toString() + " more";
-  }}
-}}
-function applyLocations() {{
+  }
+}
+function applyLocations() {
   const selected = getLocSelected();
   const sheet = "{sheet}";
   const divisionsParam = "{divisions_param}";
   let locationsParam = "All";
   if (selected.length > 0) locationsParam = selected.join(",");
   closeLocMenu();
-  const newUrl = `/?sheet=${{sheet}}&divisions=${{encodeURIComponent(divisionsParam)}}&locations=${{encodeURIComponent(locationsParam)}}`;
+  const newUrl = `/?sheet=${sheet}&divisions=${encodeURIComponent(divisionsParam)}&locations=${encodeURIComponent(locationsParam)}`;
   window.location.href = newUrl;
-}}
-function filterLocList() {{
+}
+function filterLocList() {
   const q = $("loc_search").value.toLowerCase().trim();
   const items = document.querySelectorAll('#loc_list .chk');
   let shown = 0;
-  items.forEach(it => {{
+  items.forEach(it => {
     const txt = it.innerText.toLowerCase();
     const ok = txt.indexOf(q) !== -1;
     it.style.display = ok ? "flex" : "none";
     if (ok) shown++;
-  }});
+  });
   $("loc_shown").textContent = shown.toString();
-}}
+}
 
-// ===================== EXPORT / CLEAR (UPDATED TO INCLUDE LOCATIONS) =====================
-function exportData() {{
+// ===================== EXPORT / CLEAR =====================
+function exportData() {
   const sheet = "{sheet}";
   const divisionsParam = "{divisions_param}";
   const locationsParam = "{locations_param}";
-  window.location.href = `/download?sheet=${{sheet}}&divisions=${{encodeURIComponent(divisionsParam)}}&locations=${{encodeURIComponent(locationsParam)}}`;
-}}
-function exportRawData() {{
+  window.location.href = `/download?sheet=${sheet}&divisions=${encodeURIComponent(divisionsParam)}&locations=${encodeURIComponent(locationsParam)}`;
+}
+function exportRawData() {
   const divisionsParam = "{divisions_param}";
   const locationsParam = "{locations_param}";
-  window.location.href = `/download-raw?divisions=${{encodeURIComponent(divisionsParam)}}&locations=${{encodeURIComponent(locationsParam)}}`;
-}}
-function clearAll() {{
+  window.location.href = `/download-raw?divisions=${encodeURIComponent(divisionsParam)}&locations=${encodeURIComponent(locationsParam)}`;
+}
+function clearAll() {
   window.location.href = "/?sheet=Overall_Division_Pivot&divisions=All&locations=All";
-}}
+}
 
 // Close menus when clicking outside
-document.addEventListener("click", function(e) {{
+document.addEventListener("click", function(e) {
   const box = document.querySelector(".multi");
   if (box && !box.contains(e.target)) closeMenu();
 
   const lbox = document.querySelector(".multi.loc");
   if (lbox && !lbox.contains(e.target)) closeLocMenu();
-}});
+});
 
 // Update badges on checkbox change
-document.addEventListener("change", function(e) {{
-  if (e.target && e.target.matches('#list input[type="checkbox"]')) {{
+document.addEventListener("change", function(e) {
+  if (e.target && e.target.matches('#list input[type="checkbox"]')) {
     updateButtonText();
-  }}
-  if (e.target && e.target.matches('#loc_list input[type="checkbox"]')) {{
+  }
+  if (e.target && e.target.matches('#loc_list input[type="checkbox"]')) {
     updateLocButtonText();
-  }}
-}});
+  }
+});
 </script>
 </head>
 
@@ -1370,7 +1473,6 @@ document.addEventListener("change", function(e) {{
       </div>
 
       <div class="controls">
-        <!-- PRODUCT DIVISION (EXISTING) -->
         <div class="ctrl-label">Product Division</div>
         <div class="multi">
           <button class="multi-btn" type="button" onclick="toggleMenu()">
@@ -1403,7 +1505,6 @@ document.addEventListener("change", function(e) {{
           Showing: <span id="shown">{len(all_divisions)}</span> / {len(all_divisions)}
         </div>
 
-        <!-- LOCATION (NEW) -->
         <div class="ctrl-label" style="margin-left:10px;">Location</div>
         <div class="multi loc">
           <button class="multi-btn" type="button" onclick="toggleLocMenu()">
