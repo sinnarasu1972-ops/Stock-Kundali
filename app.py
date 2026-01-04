@@ -76,7 +76,6 @@ _data_cache = None
 
 app = FastAPI(title="Unnati Stock Kundali (Render Ready)")
 
-
 # =========================================================
 # FILE READING (UNCHANGED LOGIC)
 # =========================================================
@@ -155,7 +154,7 @@ def read_file(file_path: str):
     return None, None
 
 
-def _find_input_file(filename: str) -> Path | None:
+def _find_input_file(filename: str):
     for d in CANDIDATE_INPUT_DIRS:
         p = d / filename
         if p.exists():
@@ -721,7 +720,7 @@ async def download_raw_csv(request: Request):
 
 
 # =========================================================
-# DASHBOARD (YOUR UI + WORKS ON MOBILE/DESKTOP) (LOCATION + MOBILE FIX)
+# DASHBOARD (FIXED: NO f-string, so Render won't crash)
 # =========================================================
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
@@ -788,14 +787,16 @@ async def dashboard(request: Request):
             loc_checkbox_rows.append(f'<label class="chk"><input type="checkbox" value="{v}" {checked}><span>{v}</span></label>')
         loc_checkbox_html = "".join(loc_checkbox_rows)
 
-        html = f"""<!DOCTYPE html>
+        # IMPORTANT FIX:
+        # Use plain triple-quoted HTML (NOT f-string) + replace tokens.
+        html = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Unnati Stock Kundali</title>
 <style>
-:root {{
+:root {
   --bg: #f4f6fb;
   --card: #ffffff;
   --text: #0f172a;
@@ -807,76 +808,76 @@ async def dashboard(request: Request):
   --btn2: #0a6a3a;
   --danger: #b42318;
   --shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
-}}
+}
 
-* {{ box-sizing: border-box; }}
-body {{
+* { box-sizing: border-box; }
+body {
   margin: 0;
   font-family: "Segoe UI", Tahoma, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
   height: 100vh;
   overflow: hidden;
-}}
+}
 
-.app {{
+.app {
   display: grid;
   grid-template-rows: auto 1fr;
   height: 100vh;
-}}
+}
 
-header {{
+header {
   background: linear-gradient(135deg, var(--brand1), var(--brand2));
   color: #fff;
   padding: 10px 14px;
   box-shadow: var(--shadow);
-}}
+}
 
-.hrow {{
+.hrow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-}}
+}
 
-.brand {{
+.brand {
   display: flex;
   flex-direction: column;
   min-width: 260px;
-}}
-.brand .title {{
+}
+.brand .title {
   font-size: 18px;
   font-weight: 800;
   letter-spacing: .2px;
-}}
-.brand .sub {{
+}
+.brand .sub {
   font-size: 12px;
   color: rgba(255,255,255,.75);
   margin-top: 2px;
-}}
+}
 
-.controls {{
+.controls {
   display: flex;
   align-items: center;
   gap: 10px;
   flex: 1;
   justify-content: center;
   min-width: 280px;
-}}
+}
 
-.ctrl-label {{
+.ctrl-label {
   font-size: 13px;
   font-weight: 700;
   color: rgba(255,255,255,.9);
-}}
+}
 
-.multi {{
+.multi {
   position: relative;
   width: min(520px, 70vw);
-}}
+}
 
-.multi-btn {{
+.multi-btn {
   width: 100%;
   background: #fff;
   border: 0;
@@ -887,40 +888,40 @@ header {{
   justify-content: space-between;
   gap: 10px;
   cursor: pointer;
-}}
+}
 
-.multi-btn .left {{
+.multi-btn .left {
   display: flex;
   flex-direction: column;
   gap: 2px;
   align-items: flex-start;
-}}
+}
 
-.multi-btn .top {{
+.multi-btn .top {
   font-size: 13px;
   font-weight: 800;
   color: var(--text);
-}}
+}
 
-.multi-btn .hint {{
+.multi-btn .hint {
   font-size: 12px;
   color: var(--muted);
   max-width: 430px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}}
+}
 
-.multi-btn .badge {{
+.multi-btn .badge {
   background: #e2e8f0;
   color: #0f172a;
   font-weight: 800;
   font-size: 12px;
   padding: 4px 8px;
   border-radius: 999px;
-}}
+}
 
-.multi-menu {{
+.multi-menu {
   display: none;
   position: absolute;
   top: calc(100% + 10px);
@@ -934,29 +935,29 @@ header {{
   box-shadow: var(--shadow);
   z-index: 1000;
   overflow: hidden;
-}}
+}
 
-.multi-menu.show {{ display: grid; grid-template-rows: auto 1fr auto; }}
+.multi-menu.show { display: grid; grid-template-rows: auto 1fr auto; }
 
-.multi-top {{
+.multi-top {
   padding: 10px 10px 8px;
   border-bottom: 1px solid var(--line);
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 8px;
   align-items: center;
-}}
+}
 
-.multi-top input {{
+.multi-top input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 9px 10px;
   font-size: 13px;
   outline: none;
-}}
+}
 
-.mini-btn {{
+.mini-btn {
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 10px;
@@ -964,16 +965,16 @@ header {{
   font-size: 13px;
   font-weight: 800;
   cursor: pointer;
-}}
+}
 
-.mini-btn:hover {{ background: #f8fafc; }}
+.mini-btn:hover { background: #f8fafc; }
 
-.multi-list {{
+.multi-list {
   padding: 6px 8px;
   overflow: auto;
-}}
+}
 
-.chk {{
+.chk {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -981,48 +982,48 @@ header {{
   border-radius: 10px;
   cursor: pointer;
   user-select: none;
-}}
+}
 
-.chk:hover {{ background: #f1f5f9; }}
+.chk:hover { background: #f1f5f9; }
 
-.chk input {{
+.chk input {
   width: 16px;
   height: 16px;
   accent-color: var(--btn);
-}}
+}
 
-.chk span {{
+.chk span {
   font-size: 13px;
   color: #0f172a;
-}}
+}
 
-.multi-foot {{
+.multi-foot {
   padding: 10px;
   border-top: 1px solid var(--line);
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-}}
+}
 
-.act {{
+.act {
   border: 0;
   border-radius: 10px;
   padding: 10px 12px;
   font-weight: 900;
   font-size: 13px;
   cursor: pointer;
-}}
+}
 
-.apply {{ background: #16a34a; color: #fff; }}
-.clear {{ background: #ef4444; color: #fff; }}
+.apply { background: #16a34a; color: #fff; }
+.clear { background: #ef4444; color: #fff; }
 
-.actions {{
+.actions {
   display: flex;
   gap: 8px;
   align-items: center;
-}}
+}
 
-.btn {{
+.btn {
   border: 0;
   border-radius: 10px;
   padding: 10px 12px;
@@ -1030,31 +1031,31 @@ header {{
   font-weight: 900;
   cursor: pointer;
   color: #fff;
-}}
+}
 
-.btn.export {{ background: #16a34a; }}
-.btn.raw {{ background: #0a6a3a; }}
-.btn.reset {{ background: #ef4444; }}
+.btn.export { background: #16a34a; }
+.btn.raw { background: #0a6a3a; }
+.btn.reset { background: #ef4444; }
 
-main {{
+main {
   display: grid;
   grid-template-columns: 230px 1fr;
   gap: 12px;
   padding: 12px;
   height: 100%;
   overflow: hidden;
-}}
+}
 
-aside {{
+aside {
   background: var(--card);
   border-radius: 14px;
   box-shadow: var(--shadow);
   border: 1px solid var(--line);
   overflow: auto;
   padding: 10px;
-}}
+}
 
-.navbtn {{
+.navbtn {
   display: block;
   text-decoration: none;
   text-align: center;
@@ -1065,13 +1066,13 @@ aside {{
   border-radius: 12px;
   margin-bottom: 8px;
   background: linear-gradient(135deg, #f59e0b, #d97706);
-}}
+}
 
-.navbtn.active {{
+.navbtn.active {
   background: linear-gradient(135deg, #0b1b3a, #123a7a);
-}}
+}
 
-section.content {{
+section.content {
   background: var(--card);
   border-radius: 14px;
   box-shadow: var(--shadow);
@@ -1079,60 +1080,60 @@ section.content {{
   overflow: hidden;
   display: grid;
   grid-template-rows: auto 1fr;
-}}
+}
 
-.topbar {{
+.topbar {
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-}}
+}
 
-.topbar .h1 {{
+.topbar .h1 {
   font-size: 15px;
   font-weight: 900;
   color: #0b1b3a;
-}}
+}
 
-.topbar .meta {{
+.topbar .meta {
   font-size: 12px;
   color: var(--muted);
   font-weight: 800;
   white-space: nowrap;
-}}
+}
 
-.view {{
+.view {
   overflow: auto;
   padding: 12px;
-}}
+}
 
-.tbl-title {{
+.tbl-title {
   background: linear-gradient(135deg, #4c1d95, #312e81);
   color: #fff;
   padding: 9px 12px;
   font-weight: 900;
   font-size: 13px;
   border-radius: 12px 12px 0 0;
-}}
+}
 
-.tbl-wrap {{
+.tbl-wrap {
   overflow: auto;
   border: 1px solid var(--line);
   border-top: 0;
   border-radius: 0 0 12px 12px;
-}}
+}
 
-table.pivot {{
+table.pivot {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12.5px;
   min-width: 820px;
-}}
+}
 
-table.pivot thead th {{
+table.pivot thead th {
   position: sticky;
   top: 0;
   z-index: 10;
@@ -1143,21 +1144,21 @@ table.pivot thead th {{
   text-align: center;
   font-weight: 900;
   white-space: nowrap;
-}}
+}
 
-table.pivot thead th:first-child {{
+table.pivot thead th:first-child {
   left: 0;
   z-index: 12;
   text-align: left;
-}}
+}
 
-table.pivot td {{
+table.pivot td {
   border-bottom: 1px solid var(--line);
   padding: 7px 10px;
   white-space: nowrap;
-}}
+}
 
-td.rowlabel {{
+td.rowlabel {
   position: sticky;
   left: 0;
   z-index: 5;
@@ -1165,156 +1166,105 @@ td.rowlabel {{
   font-weight: 900;
   color: #0b1b3a;
   text-align: left;
-}}
+}
 
-td.num {{ text-align: right; }}
+td.num { text-align: right; }
 
-tr.total td {{
+tr.total td {
   background: linear-gradient(180deg, #1d4ed8, #1e40af) !important;
   color: #fff !important;
   font-weight: 900;
-}}
+}
 
-.neg {{ color: #0b7a2d; font-weight: 900; }}
+.neg { color: #0b7a2d; font-weight: 900; }
 
-@media (max-width: 980px) {{
-  main {{ grid-template-columns: 1fr; }}
-  aside {{ display: none; }}
-  table.pivot {{ min-width: 780px; }}
-}}
+@media (max-width: 980px) {
+  main { grid-template-columns: 1fr; }
+  aside { display: none; }
+  table.pivot { min-width: 780px; }
+}
 
-/* =========================
-   MOBILE HEADER FIX (IMPORTANT)
-   ========================= */
-header, .hrow, .controls, .actions {{ max-width: 100%; }}
+/* MOBILE HEADER FIX */
+header, .hrow, .controls, .actions { max-width: 100%; }
 
-@media (max-width: 900px) {{
-  .hrow {{
-    justify-content: flex-start;
-  }}
-}}
+@media (max-width: 768px) {
+  body { overflow-x: hidden; }
+  header { padding: 10px 10px; }
 
-@media (max-width: 768px) {{
-  body {{ overflow-x: hidden; }}
-  header {{ padding: 10px 10px; }}
-
-  .hrow {{
+  .hrow {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
-  }}
+  }
 
-  .brand {{
-    min-width: 0;
-    width: 100%;
-    text-align: left;
-  }}
+  .brand { min-width: 0; width: 100%; text-align: left; }
 
-  .controls {{
+  .controls {
     width: 100%;
     min-width: 0;
     flex-direction: column;
     align-items: stretch;
     justify-content: flex-start;
     gap: 10px;
-  }}
+  }
 
-  .ctrl-label {{
-    width: 100%;
-    font-size: 12px;
-    margin: 0;
-  }}
+  .ctrl-label { width: 100%; font-size: 12px; margin: 0; }
 
-  .multi,
-  .multi.loc {{
-    width: 100% !important;
-    min-width: 0 !important;
-  }}
+  .multi, .multi.loc { width: 100% !important; min-width: 0 !important; }
 
-  .multi-btn {{
-    width: 100%;
-    padding: 10px 10px;
-  }}
+  .multi-btn { width: 100%; padding: 10px 10px; }
 
-  .multi-menu {{
+  .multi-menu {
     left: 0;
     width: 100% !important;
     min-width: 0 !important;
     max-height: 60vh;
-  }}
+  }
 
-  .multi-top {{
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }}
+  .multi-top { grid-template-columns: 1fr; gap: 8px; }
+  .mini-btn { width: 100%; }
 
-  .multi-top input {{
-    width: 100%;
-  }}
-
-  .mini-btn {{
-    width: 100%;
-  }}
-
-  .actions {{
+  .actions {
     width: 100%;
     display: grid;
     grid-template-columns: 1fr;
     gap: 8px;
-  }}
+  }
 
-  .btn {{
-    width: 100%;
-    text-align: center;
-    padding: 12px;
-    font-size: 13px;
-  }}
+  .btn { width: 100%; text-align: center; padding: 12px; font-size: 13px; }
 
-  main {{
-    grid-template-columns: 1fr;
-    padding: 8px;
-  }}
+  main { grid-template-columns: 1fr; padding: 8px; }
+  aside { display: none; }
 
-  aside {{ display: none; }}
+  .topbar { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .view { padding: 8px; }
 
-  .topbar {{
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-  }}
+  .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.pivot { min-width: 760px; }
+}
 
-  .view {{ padding: 8px; }}
-
-  .tbl-wrap {{
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }}
-
-  table.pivot {{ min-width: 760px; }}
-}}
-
-@media (max-width: 420px) {{
-  .brand .title {{ font-size: 16px; }}
-  .brand .sub {{ font-size: 11px; }}
-  .multi-btn .top {{ font-size: 12px; }}
-  .multi-btn .hint {{ font-size: 11px; }}
-}}
+@media (max-width: 420px) {
+  .brand .title { font-size: 16px; }
+  .brand .sub { font-size: 11px; }
+  .multi-btn .top { font-size: 12px; }
+  .multi-btn .hint { font-size: 11px; }
+}
 </style>
 
 <script>
-function $(id) { return document.getElementById(id); }
+function byId(id) { return document.getElementById(id); }
 
-// ===================== PRODUCT DIVISION MULTI =====================
+// PRODUCT DIVISION MULTI
 function toggleMenu() {
-  const m = $("menu");
+  const m = byId("menu");
   m.classList.toggle("show");
   if (m.classList.contains("show")) {
-    $("search").focus();
+    byId("search").focus();
     filterList();
   }
 }
 function closeMenu() {
-  const m = $("menu");
+  const m = byId("menu");
   m.classList.remove("show");
 }
 function getSelected() {
@@ -1328,13 +1278,12 @@ function setAll(state) {
   nodes.forEach(cb => cb.checked = state);
   updateButtonText();
 }
-function clearSelection() {
-  setAll(false);
-}
+function clearSelection() { setAll(false); }
+
 function updateButtonText() {
   const selected = getSelected();
-  const badge = $("badge");
-  const hint = $("hint");
+  const badge = byId("badge");
+  const hint = byId("hint");
   badge.textContent = selected.length.toString();
 
   if (selected.length === 0) {
@@ -1347,16 +1296,21 @@ function updateButtonText() {
 }
 function applyDivisions() {
   const selected = getSelected();
-  const sheet = "{sheet}";
+  const sheet = "__SHEET__";
   let divisionsParam = "All";
   if (selected.length > 0) divisionsParam = selected.join(",");
   closeMenu();
-  const locationsParam = "{locations_param}";
-  const newUrl = `/?sheet=${sheet}&divisions=${encodeURIComponent(divisionsParam)}&locations=${encodeURIComponent(locationsParam)}`;
+
+  const locationsParam = "__LOCATIONS_PARAM__";
+  const newUrl =
+    "/?sheet=" + encodeURIComponent(sheet) +
+    "&divisions=" + encodeURIComponent(divisionsParam) +
+    "&locations=" + encodeURIComponent(locationsParam);
+
   window.location.href = newUrl;
 }
 function filterList() {
-  const q = $("search").value.toLowerCase().trim();
+  const q = byId("search").value.toLowerCase().trim();
   const items = document.querySelectorAll('#list .chk');
   let shown = 0;
   items.forEach(it => {
@@ -1365,20 +1319,20 @@ function filterList() {
     it.style.display = ok ? "flex" : "none";
     if (ok) shown++;
   });
-  $("shown").textContent = shown.toString();
+  byId("shown").textContent = shown.toString();
 }
 
-// ===================== LOCATION MULTI =====================
+// LOCATION MULTI
 function toggleLocMenu() {
-  const m = $("loc_menu");
+  const m = byId("loc_menu");
   m.classList.toggle("show");
   if (m.classList.contains("show")) {
-    $("loc_search").focus();
+    byId("loc_search").focus();
     filterLocList();
   }
 }
 function closeLocMenu() {
-  const m = $("loc_menu");
+  const m = byId("loc_menu");
   m.classList.remove("show");
 }
 function getLocSelected() {
@@ -1392,13 +1346,12 @@ function setLocAll(state) {
   nodes.forEach(cb => cb.checked = state);
   updateLocButtonText();
 }
-function clearLocSelection() {
-  setLocAll(false);
-}
+function clearLocSelection() { setLocAll(false); }
+
 function updateLocButtonText() {
   const selected = getLocSelected();
-  const badge = $("loc_badge");
-  const hint = $("loc_hint");
+  const badge = byId("loc_badge");
+  const hint = byId("loc_hint");
   badge.textContent = selected.length.toString();
 
   if (selected.length === 0) {
@@ -1411,16 +1364,21 @@ function updateLocButtonText() {
 }
 function applyLocations() {
   const selected = getLocSelected();
-  const sheet = "{sheet}";
-  const divisionsParam = "{divisions_param}";
+  const sheet = "__SHEET__";
+  const divisionsParam = "__DIVISIONS_PARAM__";
   let locationsParam = "All";
   if (selected.length > 0) locationsParam = selected.join(",");
   closeLocMenu();
-  const newUrl = `/?sheet=${sheet}&divisions=${encodeURIComponent(divisionsParam)}&locations=${encodeURIComponent(locationsParam)}`;
+
+  const newUrl =
+    "/?sheet=" + encodeURIComponent(sheet) +
+    "&divisions=" + encodeURIComponent(divisionsParam) +
+    "&locations=" + encodeURIComponent(locationsParam);
+
   window.location.href = newUrl;
 }
 function filterLocList() {
-  const q = $("loc_search").value.toLowerCase().trim();
+  const q = byId("loc_search").value.toLowerCase().trim();
   const items = document.querySelectorAll('#loc_list .chk');
   let shown = 0;
   items.forEach(it => {
@@ -1429,20 +1387,25 @@ function filterLocList() {
     it.style.display = ok ? "flex" : "none";
     if (ok) shown++;
   });
-  $("loc_shown").textContent = shown.toString();
+  byId("loc_shown").textContent = shown.toString();
 }
 
-// ===================== EXPORT / CLEAR =====================
+// EXPORT / CLEAR
 function exportData() {
-  const sheet = "{sheet}";
-  const divisionsParam = "{divisions_param}";
-  const locationsParam = "{locations_param}";
-  window.location.href = `/download?sheet=${sheet}&divisions=${encodeURIComponent(divisionsParam)}&locations=${encodeURIComponent(locationsParam)}`;
+  const sheet = "__SHEET__";
+  const divisionsParam = "__DIVISIONS_PARAM__";
+  const locationsParam = "__LOCATIONS_PARAM__";
+  window.location.href =
+    "/download?sheet=" + encodeURIComponent(sheet) +
+    "&divisions=" + encodeURIComponent(divisionsParam) +
+    "&locations=" + encodeURIComponent(locationsParam);
 }
 function exportRawData() {
-  const divisionsParam = "{divisions_param}";
-  const locationsParam = "{locations_param}";
-  window.location.href = `/download-raw?divisions=${encodeURIComponent(divisionsParam)}&locations=${encodeURIComponent(locationsParam)}`;
+  const divisionsParam = "__DIVISIONS_PARAM__";
+  const locationsParam = "__LOCATIONS_PARAM__";
+  window.location.href =
+    "/download-raw?divisions=" + encodeURIComponent(divisionsParam) +
+    "&locations=" + encodeURIComponent(locationsParam);
 }
 function clearAll() {
   window.location.href = "/?sheet=Overall_Division_Pivot&divisions=All&locations=All";
@@ -1459,12 +1422,8 @@ document.addEventListener("click", function(e) {
 
 // Update badges on checkbox change
 document.addEventListener("change", function(e) {
-  if (e.target && e.target.matches('#list input[type="checkbox"]')) {
-    updateButtonText();
-  }
-  if (e.target && e.target.matches('#loc_list input[type="checkbox"]')) {
-    updateLocButtonText();
-  }
+  if (e.target && e.target.matches('#list input[type="checkbox"]')) updateButtonText();
+  if (e.target && e.target.matches('#loc_list input[type="checkbox"]')) updateLocButtonText();
 });
 </script>
 </head>
@@ -1498,7 +1457,7 @@ document.addEventListener("change", function(e) {
             </div>
 
             <div class="multi-list" id="list">
-              {checkbox_html}
+              __DIV_CHECKBOXES__
             </div>
 
             <div class="multi-foot">
@@ -1509,7 +1468,7 @@ document.addEventListener("change", function(e) {
         </div>
 
         <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:800;">
-          Showing: <span id="shown">{len(all_divisions)}</span> / {len(all_divisions)}
+          Showing: <span id="shown">__DIV_COUNT__</span> / __DIV_COUNT__
         </div>
 
         <div class="ctrl-label">Location</div>
@@ -1531,7 +1490,7 @@ document.addEventListener("change", function(e) {
             </div>
 
             <div class="multi-list" id="loc_list">
-              {loc_checkbox_html}
+              __LOC_CHECKBOXES__
             </div>
 
             <div class="multi-foot">
@@ -1542,7 +1501,7 @@ document.addEventListener("change", function(e) {
         </div>
 
         <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:800;">
-          Showing: <span id="loc_shown">{len(all_locations)}</span> / {len(all_locations)}
+          Showing: <span id="loc_shown">__LOC_COUNT__</span> / __LOC_COUNT__
         </div>
       </div>
 
@@ -1556,16 +1515,16 @@ document.addEventListener("change", function(e) {
 
   <main>
     <aside>
-      {buttons_html}
+      __LEFT_BUTTONS__
     </aside>
 
     <section class="content">
       <div class="topbar">
-        <div class="h1">{safe_title(sheet)} - {esc_attr(divisions_display)} | {esc_attr(locations_display)}</div>
+        <div class="h1">__TITLE_LINE__</div>
         <div class="meta">Rows depend on selected divisions / locations</div>
       </div>
       <div class="view">
-        {table_html}
+        __TABLE_HTML__
       </div>
     </section>
   </main>
@@ -1573,6 +1532,22 @@ document.addEventListener("change", function(e) {
 </body>
 </html>
 """
+
+        # Fill tokens safely
+        title_line = f"{safe_title(sheet)} - {esc_attr(divisions_display)} | {esc_attr(locations_display)}"
+        html = (html
+                .replace("__SHEET__", esc_attr(sheet))
+                .replace("__DIVISIONS_PARAM__", esc_attr(divisions_param))
+                .replace("__LOCATIONS_PARAM__", esc_attr(locations_param))
+                .replace("__DIV_CHECKBOXES__", checkbox_html)
+                .replace("__LOC_CHECKBOXES__", loc_checkbox_html)
+                .replace("__DIV_COUNT__", str(len(all_divisions)))
+                .replace("__LOC_COUNT__", str(len(all_locations)))
+                .replace("__LEFT_BUTTONS__", buttons_html)
+                .replace("__TITLE_LINE__", title_line)
+                .replace("__TABLE_HTML__", table_html)
+               )
+
         return HTMLResponse(content=html)
 
     except Exception as e:
