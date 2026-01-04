@@ -191,7 +191,7 @@ def load_files():
 
         df = df.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
         df.columns = [str(c).strip() for c in df.columns]
-        df.insert(0, "Division", division)
+        df.insert(0, "Division", division)  # <-- location code (AMT/CHI/CITY/...)
 
         all_data.append(df)
         file_count += 1
@@ -217,7 +217,7 @@ def get_data():
 
 
 # =========================================================
-# HELPERS (UNCHANGED)
+# HELPERS (UNCHANGED + LOCATION ADDED)
 # =========================================================
 def format_indian_number(num, decimal_places=0):
     if pd.isna(num):
@@ -272,13 +272,34 @@ def get_divisions(sheet_name=None):
     return sorted(df["PRODCT_DIVSN_DESC"].dropna().astype(str).unique().tolist())
 
 
-def filter_data(divisions=None):
+# ---------------- LOCATION (NEW) ----------------
+def get_locations():
+    """
+    Location = last 3 digit code you insert in column 'Division'
+    Example: AMT, CHI, CITY, HO, YAT, WAG, CHA, SHI, KOL
+    """
+    df = get_data()
+    if df is None or "Division" not in df.columns:
+        return sorted(set(FILE_MAPPINGS.values()))
+    locs = df["Division"].dropna().astype(str).unique().tolist()
+    return sorted(locs)
+
+
+def filter_data(divisions=None, locations=None):
     df = get_data()
     if df is None:
         return None
+
+    # Product Division filter (existing)
     if divisions and len(divisions) > 0 and divisions != ["All"]:
         if "PRODCT_DIVSN_DESC" in df.columns:
             df = df[df["PRODCT_DIVSN_DESC"].astype(str).isin([str(x) for x in divisions])]
+
+    # Location filter (NEW) -> based on Division column (AMT/CHI/CITY/...)
+    if locations and len(locations) > 0 and locations != ["All"]:
+        if "Division" in df.columns:
+            df = df[df["Division"].astype(str).isin([str(x) for x in locations])]
+
     return df
 
 
@@ -650,15 +671,21 @@ async def api_divisions(request: Request):
 
 
 # =========================================================
-# DOWNLOAD ENDPOINTS (PIVOT + RAW)
+# DOWNLOAD ENDPOINTS (PIVOT + RAW)  (LOCATION ADDED)
 # =========================================================
 @app.get("/download")
 async def download_csv(request: Request):
     sheet = request.query_params.get("sheet", SHEET_NAMES[0])
     divisions_param = request.query_params.get("divisions", "All")
+    locations_param = request.query_params.get("locations", "All")  # NEW
 
     divisions_list = [] if divisions_param == "All" else [d.strip() for d in divisions_param.split(",") if d.strip()]
-    df = filter_data(divisions_list if divisions_list else None)
+    locations_list = [] if locations_param == "All" else [l.strip() for l in locations_param.split(",") if l.strip()]
+
+    df = filter_data(
+        divisions_list if divisions_list else None,
+        locations_list if locations_list else None
+    )
 
     pivot_result = create_pivot(df, sheet)
     if pivot_result is None:
@@ -678,8 +705,15 @@ async def download_csv(request: Request):
 @app.get("/download-raw")
 async def download_raw_csv(request: Request):
     divisions_param = request.query_params.get("divisions", "All")
+    locations_param = request.query_params.get("locations", "All")  # NEW
+
     divisions_list = [] if divisions_param == "All" else [d.strip() for d in divisions_param.split(",") if d.strip()]
-    df = filter_data(divisions_list if divisions_list else None)
+    locations_list = [] if locations_param == "All" else [l.strip() for l in locations_param.split(",") if l.strip()]
+
+    df = filter_data(
+        divisions_list if divisions_list else None,
+        locations_list if locations_list else None
+    )
     if df is None or len(df) == 0:
         raise HTTPException(status_code=404, detail="No data to export")
 
@@ -695,14 +729,16 @@ async def download_raw_csv(request: Request):
 
 
 # =========================================================
-# DASHBOARD (YOUR UI + WORKS ON MOBILE/DESKTOP)
+# DASHBOARD (YOUR UI + WORKS ON MOBILE/DESKTOP) (LOCATION ADDED)
 # =========================================================
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     try:
         sheet = request.query_params.get("sheet", SHEET_NAMES[0])
         divisions_param = request.query_params.get("divisions", "All")
+        locations_param = request.query_params.get("locations", "All")  # NEW
 
+        # ---------------- Product Divisions selection (existing) ----------------
         if divisions_param == "All":
             divisions_list = []
             selected_divisions = []
@@ -711,29 +747,54 @@ async def dashboard(request: Request):
             divisions_list = [d.strip() for d in decoded.split(",") if d.strip()]
             selected_divisions = divisions_list[:]
 
+        # ---------------- Locations selection (NEW) ----------------
+        if locations_param == "All":
+            locations_list = []
+            selected_locations = []
+        else:
+            decoded_l = locations_param
+            locations_list = [l.strip() for l in decoded_l.split(",") if l.strip()]
+            selected_locations = locations_list[:]
+
         all_divisions = get_divisions(sheet)
+        all_locations = get_locations()  # NEW
 
         buttons = []
         for s in SHEET_NAMES:
             active = "active" if s == sheet else ""
-            buttons.append(f'<a class="navbtn {active}" href="/?sheet={s}&divisions={divisions_param}">{safe_title(s)}</a>')
+            buttons.append(
+                f'<a class="navbtn {active}" href="/?sheet={s}&divisions={divisions_param}&locations={locations_param}">{safe_title(s)}</a>'
+            )
         buttons_html = "".join(buttons)
 
-        df = filter_data(divisions_list if divisions_list else None)
+        df = filter_data(
+            divisions_list if divisions_list else None,
+            locations_list if locations_list else None
+        )
         pivot_result = create_pivot(df, sheet)
         table_html = table_to_html(pivot_result)
 
         divisions_display = "All Divisions" if not selected_divisions else ", ".join(selected_divisions)
+        locations_display = "All Locations" if not selected_locations else ", ".join(selected_locations)
 
         def esc_attr(s: str) -> str:
             return str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
 
+        # Product Division checkbox list
         checkbox_rows = []
         for div in all_divisions:
             checked = "checked" if div in selected_divisions else ""
             v = esc_attr(div)
             checkbox_rows.append(f'<label class="chk"><input type="checkbox" value="{v}" {checked}><span>{v}</span></label>')
         checkbox_html = "".join(checkbox_rows)
+
+        # Location checkbox list (NEW)
+        loc_checkbox_rows = []
+        for loc in all_locations:
+            checked = "checked" if loc in selected_locations else ""
+            v = esc_attr(loc)
+            loc_checkbox_rows.append(f'<label class="chk"><input type="checkbox" value="{v}" {checked}><span>{v}</span></label>')
+        loc_checkbox_html = "".join(loc_checkbox_rows)
 
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1134,6 +1195,7 @@ tr.total td {{
 <script>
 function $(id) {{ return document.getElementById(id); }}
 
+// ===================== PRODUCT DIVISION MULTI (EXISTING) =====================
 function toggleMenu() {{
   const m = $("menu");
   m.classList.toggle("show");
@@ -1142,29 +1204,24 @@ function toggleMenu() {{
     filterList();
   }}
 }}
-
 function closeMenu() {{
   const m = $("menu");
   m.classList.remove("show");
 }}
-
 function getSelected() {{
   const nodes = document.querySelectorAll('#list input[type="checkbox"]');
   const selected = [];
   nodes.forEach(cb => {{ if (cb.checked) selected.push(cb.value.trim()); }});
   return selected;
 }}
-
 function setAll(state) {{
   const nodes = document.querySelectorAll('#list input[type="checkbox"]');
   nodes.forEach(cb => cb.checked = state);
   updateButtonText();
 }}
-
 function clearSelection() {{
   setAll(false);
 }}
-
 function updateButtonText() {{
   const selected = getSelected();
   const badge = $("badge");
@@ -1179,17 +1236,16 @@ function updateButtonText() {{
     hint.textContent = selected.slice(0,3).join(", ") + " + " + (selected.length - 3).toString() + " more";
   }}
 }}
-
 function applyDivisions() {{
   const selected = getSelected();
   const sheet = "{sheet}";
   let divisionsParam = "All";
   if (selected.length > 0) divisionsParam = selected.join(",");
   closeMenu();
-  const newUrl = `/?sheet=${{sheet}}&divisions=${{encodeURIComponent(divisionsParam)}}`;
+  const locationsParam = "{locations_param}";
+  const newUrl = `/?sheet=${{sheet}}&divisions=${{encodeURIComponent(divisionsParam)}}&locations=${{encodeURIComponent(locationsParam)}}`;
   window.location.href = newUrl;
 }}
-
 function filterList() {{
   const q = $("search").value.toLowerCase().trim();
   const items = document.querySelectorAll('#list .chk');
@@ -1203,36 +1259,108 @@ function filterList() {{
   $("shown").textContent = shown.toString();
 }}
 
+// ===================== LOCATION MULTI (NEW) =====================
+function toggleLocMenu() {{
+  const m = $("loc_menu");
+  m.classList.toggle("show");
+  if (m.classList.contains("show")) {{
+    $("loc_search").focus();
+    filterLocList();
+  }}
+}}
+function closeLocMenu() {{
+  const m = $("loc_menu");
+  m.classList.remove("show");
+}}
+function getLocSelected() {{
+  const nodes = document.querySelectorAll('#loc_list input[type="checkbox"]');
+  const selected = [];
+  nodes.forEach(cb => {{ if (cb.checked) selected.push(cb.value.trim()); }});
+  return selected;
+}}
+function setLocAll(state) {{
+  const nodes = document.querySelectorAll('#loc_list input[type="checkbox"]');
+  nodes.forEach(cb => cb.checked = state);
+  updateLocButtonText();
+}}
+function clearLocSelection() {{
+  setLocAll(false);
+}}
+function updateLocButtonText() {{
+  const selected = getLocSelected();
+  const badge = $("loc_badge");
+  const hint = $("loc_hint");
+  badge.textContent = selected.length.toString();
+
+  if (selected.length === 0) {{
+    hint.textContent = "All Locations";
+  }} else if (selected.length <= 6) {{
+    hint.textContent = selected.join(", ");
+  }} else {{
+    hint.textContent = selected.slice(0,6).join(", ") + " + " + (selected.length - 6).toString() + " more";
+  }}
+}}
+function applyLocations() {{
+  const selected = getLocSelected();
+  const sheet = "{sheet}";
+  const divisionsParam = "{divisions_param}";
+  let locationsParam = "All";
+  if (selected.length > 0) locationsParam = selected.join(",");
+  closeLocMenu();
+  const newUrl = `/?sheet=${{sheet}}&divisions=${{encodeURIComponent(divisionsParam)}}&locations=${{encodeURIComponent(locationsParam)}}`;
+  window.location.href = newUrl;
+}}
+function filterLocList() {{
+  const q = $("loc_search").value.toLowerCase().trim();
+  const items = document.querySelectorAll('#loc_list .chk');
+  let shown = 0;
+  items.forEach(it => {{
+    const txt = it.innerText.toLowerCase();
+    const ok = txt.indexOf(q) !== -1;
+    it.style.display = ok ? "flex" : "none";
+    if (ok) shown++;
+  }});
+  $("loc_shown").textContent = shown.toString();
+}}
+
+// ===================== EXPORT / CLEAR (UPDATED TO INCLUDE LOCATIONS) =====================
 function exportData() {{
   const sheet = "{sheet}";
   const divisionsParam = "{divisions_param}";
-  window.location.href = `/download?sheet=${{sheet}}&divisions=${{encodeURIComponent(divisionsParam)}}`;
+  const locationsParam = "{locations_param}";
+  window.location.href = `/download?sheet=${{sheet}}&divisions=${{encodeURIComponent(divisionsParam)}}&locations=${{encodeURIComponent(locationsParam)}}`;
 }}
-
 function exportRawData() {{
   const divisionsParam = "{divisions_param}";
-  window.location.href = `/download-raw?divisions=${{encodeURIComponent(divisionsParam)}}`;
+  const locationsParam = "{locations_param}";
+  window.location.href = `/download-raw?divisions=${{encodeURIComponent(divisionsParam)}}&locations=${{encodeURIComponent(locationsParam)}}`;
 }}
-
 function clearAll() {{
-  window.location.href = "/?sheet=Overall_Division_Pivot&divisions=All";
+  window.location.href = "/?sheet=Overall_Division_Pivot&divisions=All&locations=All";
 }}
 
+// Close menus when clicking outside
 document.addEventListener("click", function(e) {{
   const box = document.querySelector(".multi");
-  if (!box) return;
-  if (!box.contains(e.target)) closeMenu();
+  if (box && !box.contains(e.target)) closeMenu();
+
+  const lbox = document.querySelector(".multi.loc");
+  if (lbox && !lbox.contains(e.target)) closeLocMenu();
 }});
 
+// Update badges on checkbox change
 document.addEventListener("change", function(e) {{
   if (e.target && e.target.matches('#list input[type="checkbox"]')) {{
     updateButtonText();
+  }}
+  if (e.target && e.target.matches('#loc_list input[type="checkbox"]')) {{
+    updateLocButtonText();
   }}
 }});
 </script>
 </head>
 
-<body onload="updateButtonText()">
+<body onload="updateButtonText(); updateLocButtonText();">
 <div class="app">
   <header>
     <div class="hrow">
@@ -1242,6 +1370,7 @@ document.addEventListener("change", function(e) {{
       </div>
 
       <div class="controls">
+        <!-- PRODUCT DIVISION (EXISTING) -->
         <div class="ctrl-label">Product Division</div>
         <div class="multi">
           <button class="multi-btn" type="button" onclick="toggleMenu()">
@@ -1273,6 +1402,39 @@ document.addEventListener("change", function(e) {{
         <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:800;">
           Showing: <span id="shown">{len(all_divisions)}</span> / {len(all_divisions)}
         </div>
+
+        <!-- LOCATION (NEW) -->
+        <div class="ctrl-label" style="margin-left:10px;">Location</div>
+        <div class="multi loc">
+          <button class="multi-btn" type="button" onclick="toggleLocMenu()">
+            <div class="left">
+              <div class="top">Select Locations</div>
+              <div class="hint" id="loc_hint">All Locations</div>
+            </div>
+            <div class="badge" id="loc_badge">0</div>
+          </button>
+
+          <div class="multi-menu" id="loc_menu">
+            <div class="multi-top">
+              <input id="loc_search" type="text" placeholder="Search location..." oninput="filterLocList()" />
+              <button class="mini-btn" type="button" onclick="setLocAll(true)">Select All</button>
+              <button class="mini-btn" type="button" onclick="setLocAll(false)">Clear</button>
+            </div>
+
+            <div class="multi-list" id="loc_list">
+              {loc_checkbox_html}
+            </div>
+
+            <div class="multi-foot">
+              <button class="act apply" type="button" onclick="applyLocations()">Apply</button>
+              <button class="act clear" type="button" onclick="clearLocSelection()">Clear Selection</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:800;">
+          Showing: <span id="loc_shown">{len(all_locations)}</span> / {len(all_locations)}
+        </div>
       </div>
 
       <div class="actions">
@@ -1290,8 +1452,8 @@ document.addEventListener("change", function(e) {{
 
     <section class="content">
       <div class="topbar">
-        <div class="h1">{safe_title(sheet)} - {esc_attr(divisions_display)}</div>
-        <div class="meta">Rows depend on selected divisions</div>
+        <div class="h1">{safe_title(sheet)} - {esc_attr(divisions_display)} | {esc_attr(locations_display)}</div>
+        <div class="meta">Rows depend on selected divisions / locations</div>
       </div>
       <div class="view">
         {table_html}
