@@ -191,7 +191,7 @@ def load_files():
 
         df = df.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
         df.columns = [str(c).strip() for c in df.columns]
-        df.insert(0, "Division", division)  # Location code (AMT/CHI/CITY/...)
+        df.insert(0, "Division", division)  # Location code
 
         all_data.append(df)
         file_count += 1
@@ -217,7 +217,7 @@ def get_data():
 
 
 # =========================================================
-# HELPERS (UNCHANGED + LOCATION ADDED)
+# HELPERS (UNCHANGED + LOCATION SUPPORT)
 # =========================================================
 def format_indian_number(num, decimal_places=0):
     if pd.isna(num):
@@ -276,8 +276,7 @@ def get_locations():
     df = get_data()
     if df is None or "Division" not in df.columns:
         return sorted(set(FILE_MAPPINGS.values()))
-    locs = df["Division"].dropna().astype(str).unique().tolist()
-    return sorted(locs)
+    return sorted(df["Division"].dropna().astype(str).unique().tolist())
 
 
 def filter_data(divisions=None, locations=None):
@@ -1185,12 +1184,19 @@ tr.total td {{
 }}
 
 /* =========================
-   MOBILE & TABLET FIXES
+   MOBILE HEADER FIX (IMPORTANT)
    ========================= */
-@media (max-width: 768px) {{
-  header {{
-    padding: 10px;
+header, .hrow, .controls, .actions {{ max-width: 100%; }}
+
+@media (max-width: 900px) {{
+  .hrow {{
+    justify-content: flex-start;
   }}
+}}
+
+@media (max-width: 768px) {{
+  body {{ overflow-x: hidden; }}
+  header {{ padding: 10px 10px; }}
 
   .hrow {{
     flex-direction: column;
@@ -1199,40 +1205,69 @@ tr.total td {{
   }}
 
   .brand {{
-    min-width: unset;
-    text-align: center;
+    min-width: 0;
+    width: 100%;
+    text-align: left;
   }}
 
   .controls {{
+    width: 100%;
+    min-width: 0;
     flex-direction: column;
     align-items: stretch;
+    justify-content: flex-start;
     gap: 10px;
-    width: 100%;
   }}
 
   .ctrl-label {{
+    width: 100%;
     font-size: 12px;
-    text-align: left;
+    margin: 0;
   }}
 
   .multi,
   .multi.loc {{
-    width: 100%;
+    width: 100% !important;
+    min-width: 0 !important;
   }}
 
   .multi-btn {{
+    width: 100%;
+    padding: 10px 10px;
+  }}
+
+  .multi-menu {{
+    left: 0;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-height: 60vh;
+  }}
+
+  .multi-top {{
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }}
+
+  .multi-top input {{
+    width: 100%;
+  }}
+
+  .mini-btn {{
     width: 100%;
   }}
 
   .actions {{
     width: 100%;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 8px;
   }}
 
-  .btn.reset {{
-    grid-column: span 2;
+  .btn {{
+    width: 100%;
+    text-align: center;
+    padding: 12px;
+    font-size: 13px;
   }}
 
   main {{
@@ -1240,13 +1275,7 @@ tr.total td {{
     padding: 8px;
   }}
 
-  aside {{
-    display: none;
-  }}
-
-  section.content {{
-    border-radius: 12px;
-  }}
+  aside {{ display: none; }}
 
   .topbar {{
     flex-direction: column;
@@ -1254,44 +1283,21 @@ tr.total td {{
     gap: 6px;
   }}
 
-  .topbar .h1 {{
-    font-size: 14px;
+  .view {{ padding: 8px; }}
+
+  .tbl-wrap {{
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }}
 
-  .view {{
-    padding: 8px;
-  }}
-
-  table.pivot {{
-    min-width: 720px;
-  }}
+  table.pivot {{ min-width: 760px; }}
 }}
 
-@media (max-width: 480px) {{
-  .brand .title {{
-    font-size: 16px;
-  }}
-
-  .brand .sub {{
-    font-size: 11px;
-  }}
-
-  .multi-btn .top {{
-    font-size: 12px;
-  }}
-
-  .multi-btn .hint {{
-    font-size: 11px;
-  }}
-
-  .btn {{
-    font-size: 12px;
-    padding: 9px;
-  }}
-
-  .tbl-title {{
-    font-size: 12px;
-  }}
+@media (max-width: 420px) {{
+  .brand .title {{ font-size: 16px; }}
+  .brand .sub {{ font-size: 11px; }}
+  .multi-btn .top {{ font-size: 12px; }}
+  .multi-btn .hint {{ font-size: 11px; }}
 }}
 </style>
 
@@ -1474,6 +1480,7 @@ document.addEventListener("change", function(e) {
 
       <div class="controls">
         <div class="ctrl-label">Product Division</div>
+
         <div class="multi">
           <button class="multi-btn" type="button" onclick="toggleMenu()">
             <div class="left">
@@ -1505,7 +1512,8 @@ document.addEventListener("change", function(e) {
           Showing: <span id="shown">{len(all_divisions)}</span> / {len(all_divisions)}
         </div>
 
-        <div class="ctrl-label" style="margin-left:10px;">Location</div>
+        <div class="ctrl-label">Location</div>
+
         <div class="multi loc">
           <button class="multi-btn" type="button" onclick="toggleLocMenu()">
             <div class="left">
