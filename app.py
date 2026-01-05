@@ -1434,7 +1434,6 @@ document.addEventListener("change", function(e) {
     <div class="hrow">
       <div class="brand">
         <div class="title">Unnati Stock Kundali</div>
-        <div class="sub">Render Ready | Upload: /docs → /upload → /reload</div>
       </div>
 
       <div class="controls">
