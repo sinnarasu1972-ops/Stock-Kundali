@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pathlib import Path
 import pandas as pd
 import uvicorn
-from datetime import datetime
+from datetime import datetime, timedelta
 import csv
 import os
 import warnings
@@ -33,6 +33,11 @@ CANDIDATE_INPUT_DIRS = [
     INPUT_DIR,    # /mnt/data/input  (upload API)
     BASE_DIR,     # repo folder (GitHub committed files)
 ]
+
+# DATE FILE CONFIG
+DATE_FILE = Path(os.getenv("DATE_FILE", str(DATA_DIR / "Date.xlsx"))).resolve()
+if not DATE_FILE.exists():
+    DATE_FILE = BASE_DIR / "Date.xlsx"
 
 # =========================================================
 # YOUR ORIGINAL SETTINGS (UNCHANGED)
@@ -73,8 +78,249 @@ SHEET_NAMES = [
 RIS_CATEGORY_SHEETS = ["Cat_Spares", "Cat_Accessories", "Cat_Local Accessories"]
 
 _data_cache = None
+_date_cache = None
 
 app = FastAPI(title="Unnati Stock Kundali (Render Ready)")
+
+# =========================================================
+# DATE FUNCTIONS (WITH ALL CONDITIONS)
+# =========================================================
+
+def validate_date_format(date_str: str) -> bool:
+    """
+    Validate date is in DD-MM-YYYY format
+    
+    Conditions checked:
+    - Format must be DD-MM-YYYY
+    - DD must be 01-31
+    - MM must be 01-12
+    - YYYY must be valid year
+    
+    Returns: True if valid, False otherwise
+    """
+    try:
+        if not date_str or len(date_str) != 10:
+            return False
+        
+        parts = date_str.split('-')
+        if len(parts) != 3:
+            return False
+        
+        day, month, year = parts
+        
+        # Check format
+        if not day.isdigit() or not month.isdigit() or not year.isdigit():
+            return False
+        
+        day_int = int(day)
+        month_int = int(month)
+        year_int = int(year)
+        
+        # Validate ranges
+        if day_int < 1 or day_int > 31:
+            return False
+        if month_int < 1 or month_int > 12:
+            return False
+        if year_int < 2000 or year_int > 2099:
+            return False
+        
+        # Try to parse as date
+        pd.to_datetime(date_str, format="%d-%m-%Y")
+        return True
+    except Exception:
+        return False
+
+
+def validate_dates(open_date_str: str, close_date_str: str) -> tuple[bool, str]:
+    """
+    Validate both open and close dates
+    
+    Conditions checked:
+    1. Both dates must be in DD-MM-YYYY format
+    2. Both dates must be valid dates
+    3. Close date must be >= Open date
+    4. Dates must not be in future (optional, can be removed)
+    
+    Returns: (is_valid: bool, error_message: str)
+    """
+    # Check format
+    if not validate_date_format(open_date_str):
+        return False, "Open Stock Date format invalid. Use DD-MM-YYYY"
+    
+    if not validate_date_format(close_date_str):
+        return False, "Close Stock Date format invalid. Use DD-MM-YYYY"
+    
+    # Parse dates
+    try:
+        open_date = pd.to_datetime(open_date_str, format="%d-%m-%Y")
+        close_date = pd.to_datetime(close_date_str, format="%d-%m-%Y")
+    except Exception as e:
+        return False, f"Invalid date values: {str(e)}"
+    
+    # Condition: Close date must be >= Open date
+    if close_date < open_date:
+        return False, "Close Stock Date must be on or after Open Stock Date"
+    
+    return True, "Valid"
+
+
+def load_dates():
+    """
+    Load dates from Date.xlsx
+    
+    Conditions:
+    1. Check if file exists
+    2. Check if Sheet1 exists
+    3. Check if columns exist
+    4. Validate date values
+    5. Convert to DD-MM-YYYY format
+    6. Fall back to today's date if any error
+    
+    Returns: dict with dates
+    """
+    global _date_cache
+    
+    try:
+        if not DATE_FILE.exists():
+            print(f"[DATE WARNING] Date file not found: {DATE_FILE}")
+            raise FileNotFoundError(f"Date file not found at {DATE_FILE}")
+        
+        # Read Excel file
+        df = pd.read_excel(DATE_FILE, sheet_name='Sheet1')
+        
+        # Check if has data
+        if len(df) == 0:
+            print("[DATE ERROR] Date file is empty")
+            raise ValueError("Date file is empty")
+        
+        # Check if columns exist
+        if 'Open Stock Date' not in df.columns or 'Close Stock Date' not in df.columns:
+            print("[DATE ERROR] Required columns not found. Expected: 'Open Stock Date', 'Close Stock Date'")
+            raise KeyError("Required columns not found in Date.xlsx")
+        
+        # Get first row values
+        open_date = df.iloc[0]['Open Stock Date']
+        close_date = df.iloc[0]['Close Stock Date']
+        
+        # Convert to datetime if needed
+        if not isinstance(open_date, pd.Timestamp):
+            open_date = pd.to_datetime(open_date)
+        if not isinstance(close_date, pd.Timestamp):
+            close_date = pd.to_datetime(close_date)
+        
+        # Format as DD-MM-YYYY
+        open_date_str = open_date.strftime("%d-%m-%Y")
+        close_date_str = close_date.strftime("%d-%m-%Y")
+        
+        # Validate dates
+        is_valid, error_msg = validate_dates(open_date_str, close_date_str)
+        if not is_valid:
+            print(f"[DATE ERROR] Validation failed: {error_msg}")
+            raise ValueError(f"Date validation failed: {error_msg}")
+        
+        _date_cache = {
+            "open_date": open_date_str,
+            "close_date": close_date_str,
+            "open_date_raw": open_date,
+            "close_date_raw": close_date,
+        }
+        
+        print(f"[DATE LOADED] ✓ Open: {_date_cache['open_date']}, Close: {_date_cache['close_date']}")
+        return _date_cache
+        
+    except Exception as e:
+        print(f"[DATE ERROR] Failed to load dates: {str(e)}")
+        # Fallback: use today's date
+        today = datetime.now()
+        today_str = today.strftime("%d-%m-%Y")
+        _date_cache = {
+            "open_date": today_str,
+            "close_date": today_str,
+            "open_date_raw": today,
+            "close_date_raw": today,
+        }
+        print(f"[DATE FALLBACK] Using today's date: {today_str}")
+        return _date_cache
+
+
+def save_dates(open_date_str: str, close_date_str: str) -> tuple[bool, str]:
+    """
+    Save dates to Date.xlsx
+    
+    Conditions:
+    1. Validate date formats (DD-MM-YYYY)
+    2. Validate date values (valid dates)
+    3. Validate close >= open
+    4. Create directory if not exists
+    5. Write to Excel
+    6. Update cache
+    7. Return success/error
+    
+    Returns: (success: bool, message: str)
+    """
+    global _date_cache
+    
+    try:
+        # CONDITION 1: Validate formats
+        if not open_date_str or not close_date_str:
+            return False, "Dates cannot be empty"
+        
+        # CONDITION 2: Validate format
+        is_valid, error_msg = validate_dates(open_date_str, close_date_str)
+        if not is_valid:
+            return False, error_msg
+        
+        # CONDITION 3: Parse dates
+        open_date = pd.to_datetime(open_date_str, format="%d-%m-%Y")
+        close_date = pd.to_datetime(close_date_str, format="%d-%m-%Y")
+        
+        # CONDITION 4: Final validation
+        if close_date < open_date:
+            return False, "Close Stock Date must be >= Open Stock Date"
+        
+        # CONDITION 5: Create directory
+        DATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        
+        # CONDITION 6: Create dataframe
+        df = pd.DataFrame({
+            'Open Stock Date': [open_date],
+            'Close Stock Date': [close_date]
+        })
+        
+        # CONDITION 7: Save to Excel
+        df.to_excel(DATE_FILE, sheet_name='Sheet1', index=False)
+        
+        # CONDITION 8: Update cache
+        _date_cache = {
+            "open_date": open_date_str,
+            "close_date": close_date_str,
+            "open_date_raw": open_date,
+            "close_date_raw": close_date,
+        }
+        
+        print(f"[DATE SAVED] ✓ Open: {_date_cache['open_date']}, Close: {_date_cache['close_date']}")
+        return True, "Dates saved successfully"
+        
+    except Exception as e:
+        error_msg = f"Failed to save dates: {str(e)}"
+        print(f"[DATE ERROR] {error_msg}")
+        return False, error_msg
+
+
+def get_dates():
+    """
+    Get current dates from cache or load from file
+    
+    Conditions:
+    1. Check if cache exists
+    2. Load from file if not cached
+    3. Return date dict
+    """
+    global _date_cache
+    if _date_cache is None:
+        return load_dates()
+    return _date_cache
+
 
 # =========================================================
 # FILE READING (UNCHANGED LOGIC)
@@ -125,7 +371,6 @@ def read_tsv_file(file_path: str):
 
 
 def read_xls_file(file_path: str):
-    # Try common engines safely
     for engine in ["xlrd", "openpyxl", None]:
         try:
             df = pd.read_excel(file_path, engine=engine)
@@ -146,7 +391,6 @@ def read_file(file_path: str):
     if file_format in ["XLS", "XLSX"]:
         return read_xls_file(file_path)
 
-    # Fallback attempts
     for df, method in [read_tsv_file(file_path), read_xls_file(file_path), read_html_file(file_path)]:
         if df is not None and len(df) > 0:
             return df, method
@@ -190,7 +434,7 @@ def load_files():
 
         df = df.dropna(how="all").dropna(axis=1, how="all").reset_index(drop=True)
         df.columns = [str(c).strip() for c in df.columns]
-        df.insert(0, "Division", division)  # Location code
+        df.insert(0, "Division", division)
 
         all_data.append(df)
         file_count += 1
@@ -594,16 +838,19 @@ def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
 @app.get("/health")
 async def health():
     df = get_data()
+    dates = get_dates()
     return {
         "ok": True,
         "render": IS_RENDER,
         "data_dir": str(DATA_DIR),
         "input_dir": str(INPUT_DIR),
         "base_dir": str(BASE_DIR),
+        "date_file": str(DATE_FILE),
         "candidate_input_dirs": [str(x) for x in CANDIDATE_INPUT_DIRS],
         "loaded": df is not None,
         "rows": int(len(df)) if df is not None else 0,
         "cols": int(len(df.columns)) if df is not None else 0,
+        "dates": dates,
     }
 
 
@@ -649,6 +896,75 @@ async def upload_files(files: list[UploadFile] = File(...)):
         raise HTTPException(status_code=400, detail={"message": "No valid files uploaded", "skipped": skipped})
 
     return {"status": "success", "saved": saved, "skipped": skipped, "input_dir": str(INPUT_DIR)}
+
+
+# =========================================================
+# API: DATES (NEW - WITH ALL CONDITIONS)
+# =========================================================
+@app.get("/api/dates")
+async def api_get_dates():
+    """
+    Get current Open Stock Date and Close Stock Date
+    
+    Conditions:
+    - Always returns formatted dates
+    - Returns fallback if file missing
+    - Returns cached values
+    """
+    dates = get_dates()
+    return JSONResponse(content={
+        "open_date": dates["open_date"],
+        "close_date": dates["close_date"],
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
+@app.post("/api/dates")
+async def api_set_dates(request: Request):
+    """
+    Update Open Stock Date and Close Stock Date
+    
+    Conditions checked:
+    1. Both dates provided
+    2. Valid DD-MM-YYYY format
+    3. Valid date values
+    4. Close date >= Open date
+    5. Write to file
+    6. Update cache
+    7. Return success/error
+    """
+    try:
+        body = await request.json()
+        open_date = body.get("open_date")
+        close_date = body.get("close_date")
+        
+        # CONDITION 1: Check if provided
+        if not open_date or not close_date:
+            raise HTTPException(status_code=400, detail="open_date and close_date are required")
+        
+        # CONDITION 2-4: Validate
+        is_valid, error_msg = validate_dates(open_date, close_date)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # CONDITION 5-6: Save
+        success, message = save_dates(open_date, close_date)
+        
+        if success:
+            return {
+                "status": "success",
+                "open_date": open_date,
+                "close_date": close_date,
+                "message": message,
+                "timestamp": datetime.now().isoformat(),
+            }
+        else:
+            raise HTTPException(status_code=500, detail=message)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
 
 
 # =========================================================
@@ -720,7 +1036,337 @@ async def download_raw_csv(request: Request):
 
 
 # =========================================================
-# DASHBOARD (FIXED: NO f-string, so Render won't crash)
+# ADMIN PANEL (NEW - WITH VALIDATION)
+# =========================================================
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_panel():
+    """Admin panel to update dates with all validations"""
+    dates = get_dates()
+    
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Unnati Admin - Date Manager</title>
+<style>
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+  background: linear-gradient(135deg, #0b1b3a, #123a7a);
+  color: #0f172a;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}}
+
+.container {{
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.2);
+  max-width: 500px;
+  width: 100%;
+  padding: 40px;
+}}
+
+.header {{
+  text-align: center;
+  margin-bottom: 40px;
+}}
+
+.header h1 {{
+  margin: 0;
+  font-size: 28px;
+  color: #0b1b3a;
+  text-decoration: underline;
+  text-decoration-color: #f59e0b;
+  text-underline-offset: 8px;
+}}
+
+.header p {{
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 14px;
+}}
+
+.form-group {{
+  margin-bottom: 25px;
+}}
+
+.form-group label {{
+  display: block;
+  font-weight: 900;
+  color: #0b1b3a;
+  margin-bottom: 8px;
+  font-size: 14px;
+}}
+
+.form-group input {{
+  width: 100%;
+  padding: 12px 15px;
+  border: 2px solid #e5e7eb;
+  border-radius: 10px;
+  font-size: 14px;
+  transition: all 0.3s ease;
+  font-family: inherit;
+}}
+
+.form-group input:focus {{
+  outline: none;
+  border-color: #0b1b3a;
+  box-shadow: 0 0 0 3px rgba(11, 27, 58, 0.1);
+}}
+
+.btn-group {{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+}}
+
+.btn {{
+  padding: 14px 20px;
+  border: 0;
+  border-radius: 10px;
+  font-weight: 900;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}}
+
+.btn-save {{
+  background: linear-gradient(135deg, #16a34a, #15803d);
+  color: white;
+}}
+
+.btn-save:hover {{
+  box-shadow: 0 10px 25px rgba(22, 163, 74, 0.3);
+  transform: translateY(-2px);
+}}
+
+.btn-cancel {{
+  background: #ef4444;
+  color: white;
+}}
+
+.btn-cancel:hover {{
+  box-shadow: 0 10px 25px rgba(239, 68, 68, 0.3);
+  transform: translateY(-2px);
+}}
+
+.message {{
+  display: none;
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  font-weight: 800;
+  font-size: 13px;
+  animation: slideIn 0.3s ease;
+}}
+
+.message.show {{ display: block; }}
+
+.message.success {{
+  background: #dcfce7;
+  color: #166534;
+  border: 2px solid #16a34a;
+}}
+
+.message.error {{
+  background: #fee2e2;
+  color: #991b1b;
+  border: 2px solid #ef4444;
+}}
+
+.info {{
+  background: #f0f9ff;
+  border: 2px solid #0284c7;
+  color: #0c4a6e;
+  padding: 15px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 25px;
+  font-weight: 700;
+}}
+
+.loading {{
+  display: none;
+  text-align: center;
+  color: #0b1b3a;
+  font-weight: 800;
+  margin-bottom: 20px;
+}}
+
+.spinner {{
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #e5e7eb;
+  border-top: 3px solid #0b1b3a;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}}
+
+@keyframes spin {{
+  0% {{ transform: rotate(0deg); }}
+  100% {{ transform: rotate(360deg); }}
+}}
+
+@keyframes slideIn {{
+  from {{ transform: translateY(-10px); opacity: 0; }}
+  to {{ transform: translateY(0); opacity: 1; }}
+}}
+
+@media (max-width: 480px) {{
+  .container {{ padding: 25px; }}
+  .header h1 {{ font-size: 24px; }}
+  .btn-group {{ grid-template-columns: 1fr; }}
+}}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>📅 Date Manager</h1>
+    <p>Update Stock Period Dates</p>
+  </div>
+
+  <div class="info">
+    <strong>💡 Instructions:</strong> Select open and close dates (format: DD-MM-YYYY). Close date must be on or after open date.
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <p>Updating dates...</p>
+  </div>
+
+  <div class="message" id="message"></div>
+
+  <form id="dateForm" onsubmit="saveDates(event)">
+    <div class="form-group">
+      <label for="openDate">📍 Open Stock Date (DD-MM-YYYY)</label>
+      <input type="date" id="openDate" required />
+    </div>
+
+    <div class="form-group">
+      <label for="closeDate">📍 Close Stock Date (DD-MM-YYYY)</label>
+      <input type="date" id="closeDate" required />
+    </div>
+
+    <div class="btn-group">
+      <button type="submit" class="btn btn-save">💾 Save Dates</button>
+      <button type="button" class="btn btn-cancel" onclick="goBack()">❌ Cancel</button>
+    </div>
+  </form>
+</div>
+
+<script>
+// Load current dates
+function loadDates() {{
+  fetch('/api/dates')
+    .then(r => r.json())
+    .then(data => {{
+      const open = data.open_date;
+      const close = data.close_date;
+      
+      // Convert DD-MM-YYYY to YYYY-MM-DD for input
+      const openParts = open.split('-');
+      const closeParts = close.split('-');
+      
+      document.getElementById('openDate').value = openParts[2] + '-' + openParts[1] + '-' + openParts[0];
+      document.getElementById('closeDate').value = closeParts[2] + '-' + closeParts[1] + '-' + closeParts[0];
+    }})
+    .catch(err => showMessage('Error loading dates: ' + err, 'error'));
+}}
+
+// Save dates with validation
+function saveDates(e) {{
+  e.preventDefault();
+  
+  const openInput = document.getElementById('openDate').value;
+  const closeInput = document.getElementById('closeDate').value;
+  
+  // CONDITION 1: Check if dates provided
+  if (!openInput || !closeInput) {{
+    showMessage('Please fill both dates', 'error');
+    return;
+  }}
+  
+  // CONDITION 2: Validate dates
+  const open = new Date(openInput);
+  const close = new Date(closeInput);
+  
+  if (isNaN(open.getTime()) || isNaN(close.getTime())) {{
+    showMessage('Invalid date values', 'error');
+    return;
+  }}
+  
+  // CONDITION 3: Close >= Open
+  if (close < open) {{
+    showMessage('Close date must be on or after open date', 'error');
+    return;
+  }}
+  
+  // Convert YYYY-MM-DD to DD-MM-YYYY
+  const openDate = openInput.split('-').reverse().join('-');
+  const closeDate = closeInput.split('-').reverse().join('-');
+  
+  showLoading(true);
+  
+  // CONDITION 4: Send to server
+  fetch('/api/dates', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{
+      open_date: openDate,
+      close_date: closeDate
+    }})
+  }})
+    .then(r => {{
+      if (!r.ok) return r.json().then(e => {{ throw e; }});
+      return r.json();
+    }})
+    .then(data => {{
+      showLoading(false);
+      showMessage('✅ Dates updated successfully!', 'success');
+      setTimeout(() => window.location.href = '/', 2000);
+    }})
+    .catch(err => {{
+      showLoading(false);
+      const errorMsg = err.detail || err.message || String(err);
+      showMessage('❌ Error: ' + errorMsg, 'error');
+    }});
+}}
+
+function showMessage(msg, type) {{
+  const el = document.getElementById('message');
+  el.textContent = msg;
+  el.className = 'message show ' + type;
+}}
+
+function showLoading(show) {{
+  document.getElementById('loading').style.display = show ? 'block' : 'none';
+}}
+
+function goBack() {{
+  window.location.href = '/';
+}}
+
+// Load on page load
+loadDates();
+</script>
+</body>
+</html>
+"""
+    return html
+
+
+# =========================================================
+# DASHBOARD (UPDATED WITH DATE DISPLAY)
 # =========================================================
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
@@ -749,6 +1395,7 @@ async def dashboard(request: Request):
 
         all_divisions = get_divisions(sheet)
         all_locations = get_locations()
+        dates = get_dates()
 
         buttons = []
         for s in SHEET_NAMES:
@@ -787,8 +1434,6 @@ async def dashboard(request: Request):
             loc_checkbox_rows.append(f'<label class="chk"><input type="checkbox" value="{v}" {checked}><span>{v}</span></label>')
         loc_checkbox_html = "".join(loc_checkbox_rows)
 
-        # IMPORTANT FIX:
-        # Use plain triple-quoted HTML (NOT f-string) + replace tokens.
         html = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -855,6 +1500,59 @@ header {
   font-size: 12px;
   color: rgba(255,255,255,.75);
   margin-top: 2px;
+}
+
+.date-badge {
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 900;
+  display: flex;
+  gap: 20px;
+  white-space: nowrap;
+  backdrop-filter: blur(10px);
+}
+
+.date-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+
+.date-label {
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+.date-value {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.admin-btn {
+  background: rgba(255, 193, 7, 0.2);
+  border: 2px solid rgba(255, 193, 7, 0.6);
+  color: #ffc107;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-btn:hover {
+  background: rgba(255, 193, 7, 0.3);
+  border-color: rgba(255, 193, 7, 0.8);
+  transform: translateY(-2px);
 }
 
 .controls {
@@ -1184,9 +1882,6 @@ tr.total td {
   table.pivot { min-width: 780px; }
 }
 
-/* MOBILE HEADER FIX */
-header, .hrow, .controls, .actions { max-width: 100%; }
-
 @media (max-width: 768px) {
   body { overflow-x: hidden; }
   header { padding: 10px 10px; }
@@ -1198,6 +1893,12 @@ header, .hrow, .controls, .actions { max-width: 100%; }
   }
 
   .brand { min-width: 0; width: 100%; text-align: left; }
+
+  .date-badge {
+    width: 100%;
+    justify-content: space-around;
+    padding: 10px;
+  }
 
   .controls {
     width: 100%;
@@ -1248,6 +1949,7 @@ header, .hrow, .controls, .actions { max-width: 100%; }
   .brand .sub { font-size: 11px; }
   .multi-btn .top { font-size: 12px; }
   .multi-btn .hint { font-size: 11px; }
+  .date-badge { flex-direction: column; gap: 8px; }
 }
 </style>
 
@@ -1436,6 +2138,19 @@ document.addEventListener("change", function(e) {
         <div class="title">Unnati Stock Kundali</div>
       </div>
 
+      <div class="date-badge">
+        <div class="date-item">
+          <div class="date-label">📍 Open Stock Date</div>
+          <div class="date-value">__OPEN_DATE__</div>
+        </div>
+        <div class="date-item">
+          <div class="date-label">📍 Close Stock Date</div>
+          <div class="date-value">__CLOSE_DATE__</div>
+        </div>
+      </div>
+
+      <a href="/admin" class="admin-btn">⚙️ Update Dates</a>
+
       <div class="controls">
         <div class="ctrl-label">Product Division</div>
 
@@ -1545,6 +2260,8 @@ document.addEventListener("change", function(e) {
                 .replace("__LEFT_BUTTONS__", buttons_html)
                 .replace("__TITLE_LINE__", title_line)
                 .replace("__TABLE_HTML__", table_html)
+                .replace("__OPEN_DATE__", dates["open_date"])
+                .replace("__CLOSE_DATE__", dates["close_date"])
                )
 
         return HTMLResponse(content=html)
