@@ -83,7 +83,7 @@ _date_cache = None
 app = FastAPI(title="Unnati Stock Kundali (Render Ready)")
 
 # =========================================================
-# DATE FUNCTIONS (WITH ALL CONDITIONS)
+# DATE FUNCTIONS (LOAD ONLY - NO SAVE)
 # =========================================================
 
 def validate_date_format(date_str: str) -> bool:
@@ -99,7 +99,12 @@ def validate_date_format(date_str: str) -> bool:
     Returns: True if valid, False otherwise
     """
     try:
-        if not date_str or len(date_str) != 10:
+        if not date_str or len(str(date_str).strip()) == 0:
+            return False
+        
+        date_str = str(date_str).strip()
+        
+        if len(date_str) != 10:
             return False
         
         parts = date_str.split('-')
@@ -131,42 +136,9 @@ def validate_date_format(date_str: str) -> bool:
         return False
 
 
-def validate_dates(open_date_str: str, close_date_str: str) -> tuple[bool, str]:
-    """
-    Validate both open and close dates
-    
-    Conditions checked:
-    1. Both dates must be in DD-MM-YYYY format
-    2. Both dates must be valid dates
-    3. Close date must be >= Open date
-    4. Dates must not be in future (optional, can be removed)
-    
-    Returns: (is_valid: bool, error_message: str)
-    """
-    # Check format
-    if not validate_date_format(open_date_str):
-        return False, "Open Stock Date format invalid. Use DD-MM-YYYY"
-    
-    if not validate_date_format(close_date_str):
-        return False, "Close Stock Date format invalid. Use DD-MM-YYYY"
-    
-    # Parse dates
-    try:
-        open_date = pd.to_datetime(open_date_str, format="%d-%m-%Y")
-        close_date = pd.to_datetime(close_date_str, format="%d-%m-%Y")
-    except Exception as e:
-        return False, f"Invalid date values: {str(e)}"
-    
-    # Condition: Close date must be >= Open date
-    if close_date < open_date:
-        return False, "Close Stock Date must be on or after Open Stock Date"
-    
-    return True, "Valid"
-
-
 def load_dates():
     """
-    Load dates from Date.xlsx
+    Load dates from Date.xlsx on app startup
     
     Conditions:
     1. Check if file exists
@@ -212,11 +184,17 @@ def load_dates():
         open_date_str = open_date.strftime("%d-%m-%Y")
         close_date_str = close_date.strftime("%d-%m-%Y")
         
-        # Validate dates
-        is_valid, error_msg = validate_dates(open_date_str, close_date_str)
-        if not is_valid:
-            print(f"[DATE ERROR] Validation failed: {error_msg}")
-            raise ValueError(f"Date validation failed: {error_msg}")
+        # Validate format
+        if not validate_date_format(open_date_str) or not validate_date_format(close_date_str):
+            print(f"[DATE ERROR] Date format validation failed")
+            raise ValueError("Invalid date format in file")
+        
+        # Validate range
+        open_dt = pd.to_datetime(open_date_str, format="%d-%m-%Y")
+        close_dt = pd.to_datetime(close_date_str, format="%d-%m-%Y")
+        if close_dt < open_dt:
+            print(f"[DATE ERROR] Close date is before open date")
+            raise ValueError("Close date must be >= Open date")
         
         _date_cache = {
             "open_date": open_date_str,
@@ -225,11 +203,11 @@ def load_dates():
             "close_date_raw": close_date,
         }
         
-        print(f"[DATE LOADED] ✓ Open: {_date_cache['open_date']}, Close: {_date_cache['close_date']}")
+        print(f"[DATE LOADED ✓] Open: {_date_cache['open_date']}, Close: {_date_cache['close_date']}")
         return _date_cache
         
     except Exception as e:
-        print(f"[DATE ERROR] Failed to load dates: {str(e)}")
+        print(f"[DATE ERROR] {str(e)}")
         # Fallback: use today's date
         today = datetime.now()
         today_str = today.strftime("%d-%m-%Y")
@@ -241,70 +219,6 @@ def load_dates():
         }
         print(f"[DATE FALLBACK] Using today's date: {today_str}")
         return _date_cache
-
-
-def save_dates(open_date_str: str, close_date_str: str) -> tuple[bool, str]:
-    """
-    Save dates to Date.xlsx
-    
-    Conditions:
-    1. Validate date formats (DD-MM-YYYY)
-    2. Validate date values (valid dates)
-    3. Validate close >= open
-    4. Create directory if not exists
-    5. Write to Excel
-    6. Update cache
-    7. Return success/error
-    
-    Returns: (success: bool, message: str)
-    """
-    global _date_cache
-    
-    try:
-        # CONDITION 1: Validate formats
-        if not open_date_str or not close_date_str:
-            return False, "Dates cannot be empty"
-        
-        # CONDITION 2: Validate format
-        is_valid, error_msg = validate_dates(open_date_str, close_date_str)
-        if not is_valid:
-            return False, error_msg
-        
-        # CONDITION 3: Parse dates
-        open_date = pd.to_datetime(open_date_str, format="%d-%m-%Y")
-        close_date = pd.to_datetime(close_date_str, format="%d-%m-%Y")
-        
-        # CONDITION 4: Final validation
-        if close_date < open_date:
-            return False, "Close Stock Date must be >= Open Stock Date"
-        
-        # CONDITION 5: Create directory
-        DATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        
-        # CONDITION 6: Create dataframe
-        df = pd.DataFrame({
-            'Open Stock Date': [open_date],
-            'Close Stock Date': [close_date]
-        })
-        
-        # CONDITION 7: Save to Excel
-        df.to_excel(DATE_FILE, sheet_name='Sheet1', index=False)
-        
-        # CONDITION 8: Update cache
-        _date_cache = {
-            "open_date": open_date_str,
-            "close_date": close_date_str,
-            "open_date_raw": open_date,
-            "close_date_raw": close_date,
-        }
-        
-        print(f"[DATE SAVED] ✓ Open: {_date_cache['open_date']}, Close: {_date_cache['close_date']}")
-        return True, "Dates saved successfully"
-        
-    except Exception as e:
-        error_msg = f"Failed to save dates: {str(e)}"
-        print(f"[DATE ERROR] {error_msg}")
-        return False, error_msg
 
 
 def get_dates():
@@ -856,12 +770,22 @@ async def health():
 
 @app.post("/reload")
 async def reload_data():
-    global _data_cache
+    global _data_cache, _date_cache
     _data_cache = None
+    _date_cache = None
+    
+    # Reload both data and dates
     df = load_files()
+    dates = load_dates()
+    
     if df is None:
         return {"status": "error", "message": "No data loaded. Check files exist in repo or upload to /upload."}
-    return {"status": "success", "rows": int(len(df)), "cols": int(len(df.columns))}
+    return {
+        "status": "success",
+        "rows": int(len(df)),
+        "cols": int(len(df.columns)),
+        "dates": dates
+    }
 
 
 @app.post("/upload")
@@ -899,72 +823,23 @@ async def upload_files(files: list[UploadFile] = File(...)):
 
 
 # =========================================================
-# API: DATES (NEW - WITH ALL CONDITIONS)
+# API: DATES (GET ONLY - NO SET)
 # =========================================================
 @app.get("/api/dates")
 async def api_get_dates():
     """
     Get current Open Stock Date and Close Stock Date
     
-    Conditions:
-    - Always returns formatted dates
-    - Returns fallback if file missing
-    - Returns cached values
+    Dates are read from Date.xlsx file on app startup.
+    To update: manually edit Date.xlsx and restart app.
     """
     dates = get_dates()
     return JSONResponse(content={
         "open_date": dates["open_date"],
         "close_date": dates["close_date"],
         "timestamp": datetime.now().isoformat(),
+        "source": "Date.xlsx file (manual update required)"
     })
-
-
-@app.post("/api/dates")
-async def api_set_dates(request: Request):
-    """
-    Update Open Stock Date and Close Stock Date
-    
-    Conditions checked:
-    1. Both dates provided
-    2. Valid DD-MM-YYYY format
-    3. Valid date values
-    4. Close date >= Open date
-    5. Write to file
-    6. Update cache
-    7. Return success/error
-    """
-    try:
-        body = await request.json()
-        open_date = body.get("open_date")
-        close_date = body.get("close_date")
-        
-        # CONDITION 1: Check if provided
-        if not open_date or not close_date:
-            raise HTTPException(status_code=400, detail="open_date and close_date are required")
-        
-        # CONDITION 2-4: Validate
-        is_valid, error_msg = validate_dates(open_date, close_date)
-        if not is_valid:
-            raise HTTPException(status_code=400, detail=error_msg)
-        
-        # CONDITION 5-6: Save
-        success, message = save_dates(open_date, close_date)
-        
-        if success:
-            return {
-                "status": "success",
-                "open_date": open_date,
-                "close_date": close_date,
-                "message": message,
-                "timestamp": datetime.now().isoformat(),
-            }
-        else:
-            raise HTTPException(status_code=500, detail=message)
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
 
 
 # =========================================================
@@ -1036,337 +911,7 @@ async def download_raw_csv(request: Request):
 
 
 # =========================================================
-# ADMIN PANEL (NEW - WITH VALIDATION)
-# =========================================================
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_panel():
-    """Admin panel to update dates with all validations"""
-    dates = get_dates()
-    
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Unnati Admin - Date Manager</title>
-<style>
-* {{ box-sizing: border-box; }}
-body {{
-  margin: 0;
-  font-family: "Segoe UI", Tahoma, Arial, sans-serif;
-  background: linear-gradient(135deg, #0b1b3a, #123a7a);
-  color: #0f172a;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}}
-
-.container {{
-  background: white;
-  border-radius: 20px;
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.2);
-  max-width: 500px;
-  width: 100%;
-  padding: 40px;
-}}
-
-.header {{
-  text-align: center;
-  margin-bottom: 40px;
-}}
-
-.header h1 {{
-  margin: 0;
-  font-size: 28px;
-  color: #0b1b3a;
-  text-decoration: underline;
-  text-decoration-color: #f59e0b;
-  text-underline-offset: 8px;
-}}
-
-.header p {{
-  margin: 10px 0 0;
-  color: #64748b;
-  font-size: 14px;
-}}
-
-.form-group {{
-  margin-bottom: 25px;
-}}
-
-.form-group label {{
-  display: block;
-  font-weight: 900;
-  color: #0b1b3a;
-  margin-bottom: 8px;
-  font-size: 14px;
-}}
-
-.form-group input {{
-  width: 100%;
-  padding: 12px 15px;
-  border: 2px solid #e5e7eb;
-  border-radius: 10px;
-  font-size: 14px;
-  transition: all 0.3s ease;
-  font-family: inherit;
-}}
-
-.form-group input:focus {{
-  outline: none;
-  border-color: #0b1b3a;
-  box-shadow: 0 0 0 3px rgba(11, 27, 58, 0.1);
-}}
-
-.btn-group {{
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 15px;
-}}
-
-.btn {{
-  padding: 14px 20px;
-  border: 0;
-  border-radius: 10px;
-  font-weight: 900;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}}
-
-.btn-save {{
-  background: linear-gradient(135deg, #16a34a, #15803d);
-  color: white;
-}}
-
-.btn-save:hover {{
-  box-shadow: 0 10px 25px rgba(22, 163, 74, 0.3);
-  transform: translateY(-2px);
-}}
-
-.btn-cancel {{
-  background: #ef4444;
-  color: white;
-}}
-
-.btn-cancel:hover {{
-  box-shadow: 0 10px 25px rgba(239, 68, 68, 0.3);
-  transform: translateY(-2px);
-}}
-
-.message {{
-  display: none;
-  padding: 15px;
-  border-radius: 10px;
-  margin-bottom: 20px;
-  font-weight: 800;
-  font-size: 13px;
-  animation: slideIn 0.3s ease;
-}}
-
-.message.show {{ display: block; }}
-
-.message.success {{
-  background: #dcfce7;
-  color: #166534;
-  border: 2px solid #16a34a;
-}}
-
-.message.error {{
-  background: #fee2e2;
-  color: #991b1b;
-  border: 2px solid #ef4444;
-}}
-
-.info {{
-  background: #f0f9ff;
-  border: 2px solid #0284c7;
-  color: #0c4a6e;
-  padding: 15px;
-  border-radius: 10px;
-  font-size: 13px;
-  margin-bottom: 25px;
-  font-weight: 700;
-}}
-
-.loading {{
-  display: none;
-  text-align: center;
-  color: #0b1b3a;
-  font-weight: 800;
-  margin-bottom: 20px;
-}}
-
-.spinner {{
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  border: 3px solid #e5e7eb;
-  border-top: 3px solid #0b1b3a;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}}
-
-@keyframes spin {{
-  0% {{ transform: rotate(0deg); }}
-  100% {{ transform: rotate(360deg); }}
-}}
-
-@keyframes slideIn {{
-  from {{ transform: translateY(-10px); opacity: 0; }}
-  to {{ transform: translateY(0); opacity: 1; }}
-}}
-
-@media (max-width: 480px) {{
-  .container {{ padding: 25px; }}
-  .header h1 {{ font-size: 24px; }}
-  .btn-group {{ grid-template-columns: 1fr; }}
-}}
-</style>
-</head>
-<body>
-<div class="container">
-  <div class="header">
-    <h1>📅 Date Manager</h1>
-    <p>Update Stock Period Dates</p>
-  </div>
-
-  <div class="info">
-    <strong>💡 Instructions:</strong> Select open and close dates (format: DD-MM-YYYY). Close date must be on or after open date.
-  </div>
-
-  <div class="loading" id="loading">
-    <div class="spinner"></div>
-    <p>Updating dates...</p>
-  </div>
-
-  <div class="message" id="message"></div>
-
-  <form id="dateForm" onsubmit="saveDates(event)">
-    <div class="form-group">
-      <label for="openDate">📍 Open Stock Date (DD-MM-YYYY)</label>
-      <input type="date" id="openDate" required />
-    </div>
-
-    <div class="form-group">
-      <label for="closeDate">📍 Close Stock Date (DD-MM-YYYY)</label>
-      <input type="date" id="closeDate" required />
-    </div>
-
-    <div class="btn-group">
-      <button type="submit" class="btn btn-save">💾 Save Dates</button>
-      <button type="button" class="btn btn-cancel" onclick="goBack()">❌ Cancel</button>
-    </div>
-  </form>
-</div>
-
-<script>
-// Load current dates
-function loadDates() {{
-  fetch('/api/dates')
-    .then(r => r.json())
-    .then(data => {{
-      const open = data.open_date;
-      const close = data.close_date;
-      
-      // Convert DD-MM-YYYY to YYYY-MM-DD for input
-      const openParts = open.split('-');
-      const closeParts = close.split('-');
-      
-      document.getElementById('openDate').value = openParts[2] + '-' + openParts[1] + '-' + openParts[0];
-      document.getElementById('closeDate').value = closeParts[2] + '-' + closeParts[1] + '-' + closeParts[0];
-    }})
-    .catch(err => showMessage('Error loading dates: ' + err, 'error'));
-}}
-
-// Save dates with validation
-function saveDates(e) {{
-  e.preventDefault();
-  
-  const openInput = document.getElementById('openDate').value;
-  const closeInput = document.getElementById('closeDate').value;
-  
-  // CONDITION 1: Check if dates provided
-  if (!openInput || !closeInput) {{
-    showMessage('Please fill both dates', 'error');
-    return;
-  }}
-  
-  // CONDITION 2: Validate dates
-  const open = new Date(openInput);
-  const close = new Date(closeInput);
-  
-  if (isNaN(open.getTime()) || isNaN(close.getTime())) {{
-    showMessage('Invalid date values', 'error');
-    return;
-  }}
-  
-  // CONDITION 3: Close >= Open
-  if (close < open) {{
-    showMessage('Close date must be on or after open date', 'error');
-    return;
-  }}
-  
-  // Convert YYYY-MM-DD to DD-MM-YYYY
-  const openDate = openInput.split('-').reverse().join('-');
-  const closeDate = closeInput.split('-').reverse().join('-');
-  
-  showLoading(true);
-  
-  // CONDITION 4: Send to server
-  fetch('/api/dates', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{
-      open_date: openDate,
-      close_date: closeDate
-    }})
-  }})
-    .then(r => {{
-      if (!r.ok) return r.json().then(e => {{ throw e; }});
-      return r.json();
-    }})
-    .then(data => {{
-      showLoading(false);
-      showMessage('✅ Dates updated successfully!', 'success');
-      setTimeout(() => window.location.href = '/', 2000);
-    }})
-    .catch(err => {{
-      showLoading(false);
-      const errorMsg = err.detail || err.message || String(err);
-      showMessage('❌ Error: ' + errorMsg, 'error');
-    }});
-}}
-
-function showMessage(msg, type) {{
-  const el = document.getElementById('message');
-  el.textContent = msg;
-  el.className = 'message show ' + type;
-}}
-
-function showLoading(show) {{
-  document.getElementById('loading').style.display = show ? 'block' : 'none';
-}}
-
-function goBack() {{
-  window.location.href = '/';
-}}
-
-// Load on page load
-loadDates();
-</script>
-</body>
-</html>
-"""
-    return html
-
-
-# =========================================================
-# DASHBOARD (UPDATED WITH DATE DISPLAY)
+# DASHBOARD (WITH DATE DISPLAY - NO ADMIN BUTTON)
 # =========================================================
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
@@ -1531,28 +1076,6 @@ header {
 .date-value {
   font-size: 13px;
   font-weight: 900;
-}
-
-.admin-btn {
-  background: rgba(255, 193, 7, 0.2);
-  border: 2px solid rgba(255, 193, 7, 0.6);
-  color: #ffc107;
-  padding: 8px 12px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 900;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.admin-btn:hover {
-  background: rgba(255, 193, 7, 0.3);
-  border-color: rgba(255, 193, 7, 0.8);
-  transform: translateY(-2px);
 }
 
 .controls {
@@ -2149,8 +1672,6 @@ document.addEventListener("change", function(e) {
         </div>
       </div>
 
-      <a href="/admin" class="admin-btn">⚙️ Update Dates</a>
-
       <div class="controls">
         <div class="ctrl-label">Product Division</div>
 
@@ -2277,4 +1798,6 @@ document.addEventListener("change", function(e) {
 # =========================================================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8002"))
+    # Load dates on startup
+    load_dates()
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
